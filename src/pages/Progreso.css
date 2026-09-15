@@ -1,0 +1,104 @@
+.resumen-cuadricula {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.resumen-tarjeta {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+}
+
+.resumen-valor {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.resumen-valor-rust {
+  color: var(--rust);
+}
+
+.resumen-etiqueta {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.progreso-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.progreso-tarjeta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.progreso-tarjeta:hover {
+  border-color: var(--line-strong);
+  background: var(--panel-raised);
+}
+
+.progreso-tarjeta-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.progreso-tarjeta-nombre {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15.5px;
+  color: var(--paper);
+}
+
+.progreso-tarjeta-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.progreso-tarjeta-insignias {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.progreso-insignia {
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.progreso-insignia-rust {
+  color: var(--rust);
+  background: rgba(209, 81, 47, 0.12);
+}
+
+@media (max-width: 640px) {
+  .resumen-cuadricula {
+    grid-template-columns: 1fr;
+  }
+  .progreso-tarjeta {
+    flex-wrap: wrap;
+  }
+  .progreso-tarjeta-insignias {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 70px;
+  }
+}

@@ -1,0 +1,49 @@
+.boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: transform 0.08s ease;
+}
+
+.boton:active {
+  transform: translateY(1px);
+}
+
+.boton-primario {
+  background: var(--amber);
+  color: var(--ink);
+}
+
+.boton-primario:hover {
+  background: #f0ae4e;
+}
+
+.boton-secundario {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--paper);
+}
+
+.boton-secundario:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.boton-peligro {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--rust);
+}
+
+.boton-peligro:hover {
+  border-color: var(--rust);
+  background: rgba(209, 81, 47, 0.1);
+}

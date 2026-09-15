@@ -1,0 +1,21 @@
+.encabezado-pagina {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.encabezado-pagina-titulo {
+  font-size: 26px;
+}
+
+.encabezado-pagina-descripcion {
+  margin-top: 6px;
+  font-size: 14px;
+  max-width: 52ch;
+}
+
+.encabezado-pagina-accion {
+  flex-shrink: 0;
+}
