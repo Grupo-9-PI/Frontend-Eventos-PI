@@ -1,0 +1,20 @@
+.diseno-app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.diseno-app-contenido {
+  flex: 1;
+  padding: 40px 48px 64px;
+  max-width: 920px;
+}
+
+@media (max-width: 860px) {
+  .diseno-app {
+    flex-direction: column;
+  }
+  .diseno-app-contenido {
+    padding: 24px 20px 48px;
+    max-width: none;
+  }
+}

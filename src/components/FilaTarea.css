@@ -1,0 +1,103 @@
+.fila-tarea {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.fila-tarea:last-child {
+  border-bottom: none;
+}
+
+.fila-tarea-check {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fila-tarea-hecha .fila-tarea-check {
+  background: var(--sage);
+  border-color: var(--sage);
+}
+
+.fila-tarea-check:hover {
+  border-color: var(--amber);
+}
+
+.fila-tarea-principal {
+  flex: 1;
+  min-width: 0;
+}
+
+.fila-tarea-titulo {
+  font-size: 14.5px;
+  color: var(--paper);
+}
+
+.fila-tarea-hecha .fila-tarea-titulo {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}
+
+.fila-tarea-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.fila-tarea-meta-punto {
+  margin: 0 5px;
+}
+
+.fila-tarea-meta-enlace {
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+}
+
+.fila-tarea-meta-enlace:hover {
+  color: var(--amber);
+}
+
+.fila-tarea-acciones {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.fila-tarea-reprogramar {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  padding: 0;
+}
+
+.fila-tarea-reprogramar:hover {
+  color: var(--amber);
+}
+
+@media (max-width: 640px) {
+  .fila-tarea {
+    flex-wrap: wrap;
+  }
+  .fila-tarea-acciones {
+    margin-left: 36px;
+    width: 100%;
+    justify-content: space-between;
+  }
+}

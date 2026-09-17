@@ -1,0 +1,50 @@
+.talon {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 24px;
+}
+
+.talon-barra {
+  width: 4px;
+  flex-shrink: 0;
+}
+
+.talon-texto {
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.talon-rust .talon-barra {
+  background: var(--rust);
+}
+.talon-rust .talon-texto {
+  color: var(--rust);
+}
+
+.talon-amber .talon-barra {
+  background: var(--amber);
+}
+.talon-amber .talon-texto {
+  color: var(--amber);
+}
+
+.talon-sage .talon-barra {
+  background: var(--sage);
+}
+.talon-sage .talon-texto {
+  color: var(--sage);
+}
+
+.talon-muted .talon-barra {
+  background: var(--line-strong);
+}
+.talon-muted .talon-texto {
+  color: var(--muted);
+}
