@@ -4,7 +4,7 @@ export default function AnilloProgreso({ porcentaje = 0, tamano = 56 }) {
   const circunferencia = 2 * Math.PI * radio;
   const desplazamiento = circunferencia - (porcentaje / 100) * circunferencia;
   const color =
-    porcentaje >= 100 ? "var(--sage)" : porcentaje >= 50 ? "var(--amber)" : "var(--rust)";
+    porcentaje >= 100 ? "var(--salvia)" : porcentaje >= 50 ? "var(--ambar)" : "var(--oxido)";
 
   return (
     <svg width={tamano} height={tamano} viewBox={`0 0 ${tamano} ${tamano}`}>
@@ -13,7 +13,7 @@ export default function AnilloProgreso({ porcentaje = 0, tamano = 56 }) {
         cy={tamano / 2}
         r={radio}
         fill="none"
-        stroke="var(--line)"
+        stroke="var(--linea)"
         strokeWidth={grosor}
       />
       <circle
@@ -33,10 +33,10 @@ export default function AnilloProgreso({ porcentaje = 0, tamano = 56 }) {
         y="50%"
         textAnchor="middle"
         dominantBaseline="central"
-        fontFamily="var(--font-display)"
+        fontFamily="var(--fuente-titulo)"
         fontSize={tamano * 0.26}
         fontWeight="600"
-        fill="var(--paper)"
+        fill="var(--papel)"
       >
         {porcentaje}%
       </text>

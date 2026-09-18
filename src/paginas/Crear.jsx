@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { almacenEventos, sumarDias, hoyISO } from "../store/almacenEventos";
-import EncabezadoPagina from "../components/EncabezadoPagina";
-import Boton from "../components/Boton";
+import { almacenEventos, sumarDias, hoyISO } from "../almacen/almacenEventos";
+import EncabezadoPagina from "../componentes/EncabezadoPagina";
+import Boton from "../componentes/Boton";
 import "./Crear.css";
 
 export default function Crear() {
@@ -10,6 +10,7 @@ export default function Crear() {
   const [formulario, setFormulario] = useState({
     nombre: "",
     fecha: sumarDias(hoyISO(), 14),
+    horaLimite: "18:00",
     lugar: "",
     notas: "",
   });
@@ -29,6 +30,10 @@ export default function Crear() {
       setError("Elige una fecha.");
       return;
     }
+    if (!formulario.horaLimite) {
+      setError("Elige una hora límite para el evento.");
+      return;
+    }
     const nuevo = almacenEventos.crear(formulario);
     navegar(`/evento/${nuevo.id}`);
   }
@@ -37,7 +42,7 @@ export default function Crear() {
     <div>
       <EncabezadoPagina
         titulo="Crear evento"
-        descripcion="Registra los datos básicos. Podrás agregar las tareas de logística en el detalle del evento."
+        descripcion="Registra los datos básicos, incluyendo la hora que marca el plazo máximo del evento. Podrás agregar las tareas de logística en el detalle del evento."
       />
 
       <form className="crear-formulario" onSubmit={enviar}>
@@ -63,15 +68,25 @@ export default function Crear() {
             />
           </div>
           <div className="campo">
-            <label htmlFor="lugar">Lugar</label>
+            <label htmlFor="horaLimite">Hora límite</label>
             <input
-              id="lugar"
-              type="text"
-              placeholder="Ej. Galería Ámbar, Manizales"
-              value={formulario.lugar}
-              onChange={(e) => actualizarCampo("lugar", e.target.value)}
+              id="horaLimite"
+              type="time"
+              value={formulario.horaLimite}
+              onChange={(e) => actualizarCampo("horaLimite", e.target.value)}
             />
           </div>
+        </div>
+
+        <div className="campo">
+          <label htmlFor="lugar">Lugar</label>
+          <input
+            id="lugar"
+            type="text"
+            placeholder="Ej. Galería Ámbar, Manizales"
+            value={formulario.lugar}
+            onChange={(e) => actualizarCampo("lugar", e.target.value)}
+          />
         </div>
 
         <div className="campo">

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { diasHasta } from "../store/almacenEventos";
+import { diasHasta, esUrgenteHoy, formatoDuracion } from "../almacen/almacenEventos";
 import TalonEstado from "./TalonEstado";
 import "./FilaTarea.css";
 
@@ -19,9 +19,16 @@ export default function FilaTarea({
 }) {
   const dias = diasHasta(tarea.fechaLimite);
   const hecha = tarea.estado === "hecho";
+  const urgente = esUrgenteHoy(tarea);
 
   return (
-    <div className={"fila-tarea" + (hecha ? " fila-tarea-hecha" : "")}>
+    <div
+      className={
+        "fila-tarea" +
+        (hecha ? " fila-tarea-hecha" : "") +
+        (urgente ? " fila-tarea-urgente" : "")
+      }
+    >
       <button
         className="fila-tarea-check"
         onClick={() => alMarcarHecho?.(tarea)}
@@ -32,9 +39,18 @@ export default function FilaTarea({
       </button>
 
       <div className="fila-tarea-principal">
-        <div className="fila-tarea-titulo">{tarea.titulo}</div>
+        <div className="fila-tarea-titulo">
+          {tarea.titulo}
+          {urgente && <span className="fila-tarea-etiqueta-urgente">Gestión inmediata</span>}
+        </div>
         <div className="fila-tarea-meta">
           <span>{NOMBRES_CATEGORIA[tarea.categoria] || tarea.categoria}</span>
+          {tarea.tiempoEstimado && (
+            <>
+              <span className="fila-tarea-meta-punto">·</span>
+              <span>{formatoDuracion(tarea.tiempoEstimado)} estimadas</span>
+            </>
+          )}
           {mostrarEvento && tarea.eventoId && (
             <>
               <span className="fila-tarea-meta-punto">·</span>
@@ -52,7 +68,7 @@ export default function FilaTarea({
             Reprogramar
           </button>
         )}
-        <TalonEstado dias={dias} estado={tarea.estado} />
+        <TalonEstado dias={dias} estado={tarea.estado} hora={tarea.horaLimite} />
       </div>
     </div>
   );

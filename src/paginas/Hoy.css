@@ -3,53 +3,53 @@
 }
 
 .hoy-seccion-titulo {
-  font-family: var(--font-display);
+  font-family: var(--fuente-titulo);
   font-weight: 600;
   font-size: 14px;
-  color: var(--paper);
+  color: var(--papel);
   display: flex;
   align-items: center;
   gap: 8px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--linea-fuerte);
   margin-bottom: 4px;
 }
 
-.hoy-seccion-titulo-rust {
-  color: var(--rust);
+.hoy-seccion-titulo-oxido {
+  color: var(--oxido);
 }
 
-.hoy-seccion-titulo-amber {
-  color: var(--amber);
+.hoy-seccion-titulo-ambar {
+  color: var(--ambar);
 }
 
 .hoy-seccion-contador {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--apagado);
   font-weight: 500;
-  font-family: var(--font-body);
+  font-family: var(--fuente-texto);
 }
 
 .hoy-lista {
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-md);
   padding: 4px 14px;
 }
 
 .hoy-vacio {
   font-size: 13.5px;
-  color: var(--muted);
+  color: var(--apagado);
   padding: 14px 2px;
 }
 
 .hoy-vacio-total {
   padding: 40px 0;
   text-align: center;
-  color: var(--muted);
+  color: var(--apagado);
 }
 
 .hoy-vacio-enlace {
-  color: var(--amber);
+  color: var(--azul-claro);
   text-decoration: underline;
 }

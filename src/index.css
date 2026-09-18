@@ -1,23 +1,29 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
 
 :root {
-  --ink: #211f1c;
-  --panel: #2b2925;
-  --panel-raised: #332f29;
-  --line: rgba(236, 231, 219, 0.12);
-  --line-strong: rgba(236, 231, 219, 0.22);
-  --paper: #ece7db;
-  --muted: #9c9686;
+  /* Fondo: negro claro (un gris muy oscuro, no negro puro) */
+  --tinta: #1a1a1a;
+  --panel: #232323;
+  --panel-elevado: #2b2b2b;
+  --linea: rgba(255, 255, 255, 0.08);
+  --linea-fuerte: rgba(255, 255, 255, 0.16);
+  --papel: #ededed;
+  --apagado: #9a9a9a;
 
-  --amber: #e8a33d;
-  --rust: #d1512f;
-  --sage: #6fae86;
+  /* Azul oscuro: color de marca para botones y detalles interactivos */
+  --azul: #1f4e79;
+  --azul-claro: #2c6693;
 
-  --font-display: "Space Grotesk", "Arial Narrow", sans-serif;
-  --font-body: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Colores de urgencia (independientes del azul de marca) */
+  --ambar: #e8a33d;
+  --oxido: #d1512f;
+  --salvia: #6fae86;
 
-  --radius-sm: 4px;
-  --radius-md: 6px;
+  --fuente-titulo: "Space Grotesk", "Arial Narrow", sans-serif;
+  --fuente-texto: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --radio-pq: 4px;
+  --radio-md: 6px;
 
   color-scheme: dark;
 }
@@ -33,9 +39,9 @@ body {
 }
 
 body {
-  background: var(--ink);
-  color: var(--paper);
-  font-family: var(--font-body);
+  background: var(--tinta);
+  color: var(--papel);
+  font-family: var(--fuente-texto);
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -48,7 +54,7 @@ body {
 h1,
 h2,
 h3 {
-  font-family: var(--font-display);
+  font-family: var(--fuente-titulo);
   font-weight: 600;
   margin: 0;
   letter-spacing: -0.01em;
@@ -56,7 +62,7 @@ h3 {
 
 p {
   margin: 0;
-  color: var(--muted);
+  color: var(--apagado);
 }
 
 a {
@@ -64,18 +70,18 @@ a {
 }
 
 button {
-  font-family: var(--font-body);
+  font-family: var(--fuente-texto);
   cursor: pointer;
 }
 
 input,
 select,
 textarea {
-  font-family: var(--font-body);
-  color: var(--paper);
-  background: var(--ink);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
+  font-family: var(--fuente-texto);
+  color: var(--papel);
+  background: var(--tinta);
+  border: 1px solid var(--linea-fuerte);
+  border-radius: var(--radio-pq);
   padding: 10px 12px;
   font-size: 14.5px;
 }
@@ -85,7 +91,7 @@ select:focus,
 textarea:focus,
 button:focus-visible,
 a:focus-visible {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--azul-claro);
   outline-offset: 2px;
 }
 
