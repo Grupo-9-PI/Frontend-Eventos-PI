@@ -1,13 +1,15 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { almacenEventos, diasHasta, sumarDias, hoyISO } from "../store/almacenEventos";
-import EncabezadoPagina from "../components/EncabezadoPagina";
-import FilaTarea from "../components/FilaTarea";
+import { almacenEventos, diasHasta } from "../almacen/almacenEventos";
+import EncabezadoPagina from "../componentes/EncabezadoPagina";
+import FilaTarea from "../componentes/FilaTarea";
+import ModalReprogramar from "../componentes/ModalReprogramar";
 import "./Hoy.css";
 
 export default function Hoy() {
   const [version, setVersion] = useState(0);
   const refrescar = () => setVersion((v) => v + 1);
+  const [tareaAReprogramar, setTareaAReprogramar] = useState(null);
 
   const tareas = useMemo(() => almacenEventos.tareasGlobales(), [version]);
 
@@ -39,12 +41,6 @@ export default function Hoy() {
     refrescar();
   }
 
-  function reprogramar(tarea) {
-    const nuevaFecha = sumarDias(hoyISO(), 3);
-    almacenEventos.actualizarTarea(tarea.eventoId, tarea.id, { fechaLimite: nuevaFecha });
-    refrescar();
-  }
-
   return (
     <div>
       <EncabezadoPagina
@@ -58,7 +54,7 @@ export default function Hoy() {
 
       {grupos.vencidas.length > 0 && (
         <section className="hoy-seccion">
-          <div className="hoy-seccion-titulo hoy-seccion-titulo-rust">
+          <div className="hoy-seccion-titulo hoy-seccion-titulo-oxido">
             Retrasadas
             <span className="hoy-seccion-contador">{grupos.vencidas.length}</span>
           </div>
@@ -69,7 +65,7 @@ export default function Hoy() {
                 tarea={t}
                 mostrarEvento
                 alMarcarHecho={marcarHecho}
-                alReprogramar={reprogramar}
+                alReprogramar={setTareaAReprogramar}
               />
             ))}
           </div>
@@ -77,7 +73,7 @@ export default function Hoy() {
       )}
 
       <section className="hoy-seccion">
-        <div className="hoy-seccion-titulo hoy-seccion-titulo-amber">
+        <div className="hoy-seccion-titulo hoy-seccion-titulo-ambar">
           Vence hoy
           <span className="hoy-seccion-contador">{grupos.hoy.length}</span>
         </div>
@@ -91,7 +87,7 @@ export default function Hoy() {
                 tarea={t}
                 mostrarEvento
                 alMarcarHecho={marcarHecho}
-                alReprogramar={reprogramar}
+                alReprogramar={setTareaAReprogramar}
               />
             ))}
           </div>
@@ -111,7 +107,7 @@ export default function Hoy() {
                 tarea={t}
                 mostrarEvento
                 alMarcarHecho={marcarHecho}
-                alReprogramar={reprogramar}
+                alReprogramar={setTareaAReprogramar}
               />
             ))}
           </div>
@@ -126,6 +122,17 @@ export default function Hoy() {
           </Link>
           .
         </div>
+      )}
+
+      {tareaAReprogramar && (
+        <ModalReprogramar
+          tarea={tareaAReprogramar}
+          onCerrar={() => setTareaAReprogramar(null)}
+          onReprogramado={() => {
+            setTareaAReprogramar(null);
+            refrescar();
+          }}
+        />
       )}
     </div>
   );

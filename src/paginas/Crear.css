@@ -1,8 +1,8 @@
 .crear-formulario {
   max-width: 520px;
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-md);
   padding: 28px;
   display: flex;
   flex-direction: column;
@@ -18,7 +18,7 @@
 
 .campo label {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--apagado);
   font-weight: 500;
 }
 
@@ -29,11 +29,11 @@
 
 .crear-error {
   font-size: 13px;
-  color: var(--rust);
+  color: var(--oxido);
   background: rgba(209, 81, 47, 0.1);
   border: 1px solid rgba(209, 81, 47, 0.3);
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radio-pq);
 }
 
 .crear-acciones {

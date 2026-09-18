@@ -3,7 +3,7 @@
   align-items: center;
   gap: 14px;
   padding: 13px 4px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--linea);
 }
 
 .fila-tarea:last-child {
@@ -14,10 +14,10 @@
   width: 22px;
   height: 22px;
   flex-shrink: 0;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line-strong);
+  border-radius: var(--radio-pq);
+  border: 1px solid var(--linea-fuerte);
   background: transparent;
-  color: var(--ink);
+  color: var(--tinta);
   font-size: 13px;
   font-weight: 700;
   display: flex;
@@ -26,12 +26,12 @@
 }
 
 .fila-tarea-hecha .fila-tarea-check {
-  background: var(--sage);
-  border-color: var(--sage);
+  background: var(--salvia);
+  border-color: var(--salvia);
 }
 
 .fila-tarea-check:hover {
-  border-color: var(--amber);
+  border-color: var(--azul-claro);
 }
 
 .fila-tarea-principal {
@@ -41,18 +41,42 @@
 
 .fila-tarea-titulo {
   font-size: 14.5px;
-  color: var(--paper);
+  color: var(--papel);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fila-tarea-urgente .fila-tarea-titulo {
+  text-decoration: underline;
+  text-decoration-color: var(--ambar);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  font-weight: 600;
+}
+
+.fila-tarea-etiqueta-urgente {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--ambar);
+  border: 1px solid var(--ambar);
+  border-radius: 3px;
+  padding: 1px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .fila-tarea-hecha .fila-tarea-titulo {
-  color: var(--muted);
+  color: var(--apagado);
   text-decoration: line-through;
-  text-decoration-color: var(--line-strong);
+  text-decoration-color: var(--linea-fuerte);
 }
 
 .fila-tarea-meta {
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--apagado);
   margin-top: 2px;
 }
 
@@ -61,13 +85,13 @@
 }
 
 .fila-tarea-meta-enlace {
-  color: var(--muted);
+  color: var(--apagado);
   text-decoration: underline;
-  text-decoration-color: var(--line-strong);
+  text-decoration-color: var(--linea-fuerte);
 }
 
 .fila-tarea-meta-enlace:hover {
-  color: var(--amber);
+  color: var(--azul-claro);
 }
 
 .fila-tarea-acciones {
@@ -80,15 +104,15 @@
 .fila-tarea-reprogramar {
   background: none;
   border: none;
-  color: var(--muted);
+  color: var(--apagado);
   font-size: 12.5px;
   text-decoration: underline;
-  text-decoration-color: var(--line-strong);
+  text-decoration-color: var(--linea-fuerte);
   padding: 0;
 }
 
 .fila-tarea-reprogramar:hover {
-  color: var(--amber);
+  color: var(--ambar);
 }
 
 @media (max-width: 640px) {

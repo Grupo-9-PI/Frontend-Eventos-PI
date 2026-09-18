@@ -4,7 +4,7 @@
   width: 232px;
   flex-shrink: 0;
   background: var(--panel);
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--linea);
   padding: 24px 16px;
   height: 100vh;
   position: sticky;
@@ -16,37 +16,37 @@
   align-items: center;
   gap: 10px;
   padding: 0 8px 24px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--linea);
   margin-bottom: 20px;
 }
 
 .barra-lateral-marca-icono {
-  font-family: var(--font-display);
+  font-family: var(--fuente-titulo);
   font-weight: 700;
   font-size: 14px;
-  background: var(--amber);
-  color: var(--ink);
+  background: var(--azul);
+  color: var(--papel);
   width: 32px;
   height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radio-pq);
   flex-shrink: 0;
 }
 
 .barra-lateral-marca-nombre {
-  font-family: var(--font-display);
+  font-family: var(--fuente-titulo);
   font-weight: 600;
   font-size: 15px;
 }
 
 .barra-lateral-marca-etiqueta {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--apagado);
 }
 
-.barra-lateral-nav {
+.barra-lateral-navegacion {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -58,36 +58,36 @@
   flex-direction: column;
   gap: 1px;
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radio-pq);
   text-decoration: none;
-  color: var(--muted);
+  color: var(--apagado);
   border-left: 2px solid transparent;
 }
 
 .barra-lateral-enlace:hover {
-  background: var(--panel-raised);
-  color: var(--paper);
+  background: var(--panel-elevado);
+  color: var(--papel);
 }
 
 .barra-lateral-enlace-activo {
-  background: var(--panel-raised);
-  color: var(--paper);
-  border-left: 2px solid var(--amber);
+  background: var(--panel-elevado);
+  color: var(--papel);
+  border-left: 2px solid var(--azul);
 }
 
 .barra-lateral-enlace-etiqueta {
-  font-family: var(--font-display);
+  font-family: var(--fuente-titulo);
   font-weight: 600;
   font-size: 14.5px;
 }
 
 .barra-lateral-enlace-descripcion {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--apagado);
 }
 
 .barra-lateral-pie {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--linea);
   padding-top: 16px;
   display: flex;
   flex-direction: column;
@@ -96,16 +96,16 @@
 
 .barra-lateral-usuario {
   font-size: 13px;
-  color: var(--paper);
+  color: var(--papel);
   padding: 0 4px;
 }
 
 .barra-lateral-cerrar-sesion {
   background: none;
-  border: 1px solid var(--line-strong);
-  color: var(--muted);
+  border: 1px solid var(--linea-fuerte);
+  color: var(--apagado);
   padding: 8px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radio-pq);
   font-size: 13px;
   text-align: left;
   text-decoration: none;
@@ -113,8 +113,8 @@
 }
 
 .barra-lateral-cerrar-sesion:hover {
-  border-color: var(--amber);
-  color: var(--paper);
+  border-color: var(--azul);
+  color: var(--papel);
 }
 
 @media (max-width: 860px) {
@@ -133,7 +133,7 @@
     padding: 0;
     margin: 0;
   }
-  .barra-lateral-nav {
+  .barra-lateral-navegacion {
     flex-direction: row;
   }
   .barra-lateral-enlace {
@@ -145,7 +145,7 @@
   }
   .barra-lateral-enlace-activo {
     border-left: none;
-    border-bottom: 2px solid var(--amber);
+    border-bottom: 2px solid var(--azul);
   }
   .barra-lateral-enlace-descripcion {
     display: none;

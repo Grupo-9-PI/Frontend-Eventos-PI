@@ -10,8 +10,8 @@
   width: 100%;
   max-width: 380px;
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-md);
   padding: 32px;
   display: flex;
   flex-direction: column;
@@ -19,17 +19,17 @@
 }
 
 .inicio-sesion-icono {
-  font-family: var(--font-display);
+  font-family: var(--fuente-titulo);
   font-weight: 700;
   font-size: 15px;
-  background: var(--amber);
-  color: var(--ink);
+  background: var(--azul);
+  color: var(--papel);
   width: 36px;
   height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radio-pq);
 }
 
 .inicio-sesion-titulo {

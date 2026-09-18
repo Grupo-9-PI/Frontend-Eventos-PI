@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useAutenticacion } from "../store/contextoAutenticacion";
-import Boton from "../components/Boton";
+import { useAutenticacion } from "../almacen/contextoAutenticacion";
+import Boton from "../componentes/Boton";
 import "./IniciarSesion.css";
 
 export default function IniciarSesion() {

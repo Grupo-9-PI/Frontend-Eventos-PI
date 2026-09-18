@@ -7,31 +7,62 @@
 
 .resumen-tarjeta {
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-md);
   padding: 18px 20px;
 }
 
+.resumen-tarjeta-boton {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+
+.resumen-tarjeta-boton:hover {
+  border-color: var(--linea-fuerte);
+  background: var(--panel-elevado);
+}
+
+.resumen-tarjeta-activa {
+  border-color: var(--azul-claro);
+}
+
 .resumen-valor {
-  font-family: var(--font-display);
+  font-family: var(--fuente-titulo);
   font-size: 26px;
   font-weight: 600;
 }
 
-.resumen-valor-rust {
-  color: var(--rust);
+.resumen-valor-oxido {
+  color: var(--oxido);
 }
 
 .resumen-etiqueta {
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--apagado);
   margin-top: 4px;
 }
 
+.progreso-completadas {
+  background: var(--panel);
+  border: 1px solid var(--linea-fuerte);
+  border-radius: var(--radio-md);
+  padding: 18px 20px;
+  margin-bottom: 28px;
+}
+
+.progreso-completadas-titulo {
+  font-family: var(--fuente-titulo);
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
 .progreso-lista {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
 }
 
 .progreso-tarjeta {
@@ -39,16 +70,16 @@
   align-items: center;
   gap: 18px;
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-md);
   padding: 16px 20px;
   text-decoration: none;
   color: inherit;
 }
 
 .progreso-tarjeta:hover {
-  border-color: var(--line-strong);
-  background: var(--panel-raised);
+  border-color: var(--linea-fuerte);
+  background: var(--panel-elevado);
 }
 
 .progreso-tarjeta-info {
@@ -57,15 +88,15 @@
 }
 
 .progreso-tarjeta-nombre {
-  font-family: var(--font-display);
+  font-family: var(--fuente-titulo);
   font-weight: 600;
   font-size: 15.5px;
-  color: var(--paper);
+  color: var(--papel);
 }
 
 .progreso-tarjeta-meta {
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--apagado);
   margin-top: 3px;
 }
 
@@ -80,12 +111,12 @@
   font-size: 11.5px;
   font-weight: 500;
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radio-pq);
   white-space: nowrap;
 }
 
-.progreso-insignia-rust {
-  color: var(--rust);
+.progreso-insignia-oxido {
+  color: var(--oxido);
   background: rgba(209, 81, 47, 0.12);
 }
 

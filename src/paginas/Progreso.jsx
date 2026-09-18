@@ -1,13 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { almacenEventos, diasHasta } from "../store/almacenEventos";
-import EncabezadoPagina from "../components/EncabezadoPagina";
-import AnilloProgreso from "../components/AnilloProgreso";
-import TalonEstado from "../components/TalonEstado";
+import { almacenEventos, diasHasta } from "../almacen/almacenEventos";
+import EncabezadoPagina from "../componentes/EncabezadoPagina";
+import AnilloProgreso from "../componentes/AnilloProgreso";
+import TalonEstado from "../componentes/TalonEstado";
+import FilaTarea from "../componentes/FilaTarea";
 import "./Progreso.css";
 
 export default function Progreso() {
   const eventos = useMemo(() => almacenEventos.listar(), []);
+  const [mostrarCompletadas, setMostrarCompletadas] = useState(false);
 
   const resumen = useMemo(() => {
     let total = 0;
@@ -23,6 +25,11 @@ export default function Progreso() {
     return { total, hechas, vencidas, eventosActivos: eventos.length };
   }, [eventos]);
 
+  const tareasCompletadas = useMemo(
+    () => almacenEventos.tareasGlobales().filter((t) => t.estado === "hecho"),
+    [eventos, mostrarCompletadas]
+  );
+
   return (
     <div>
       <EncabezadoPagina
@@ -35,17 +42,43 @@ export default function Progreso() {
           <div className="resumen-valor">{resumen.eventosActivos}</div>
           <div className="resumen-etiqueta">Eventos activos</div>
         </div>
-        <div className="resumen-tarjeta">
+
+        <button
+          type="button"
+          className={
+            "resumen-tarjeta resumen-tarjeta-boton" +
+            (mostrarCompletadas ? " resumen-tarjeta-activa" : "")
+          }
+          onClick={() => setMostrarCompletadas((v) => !v)}
+        >
           <div className="resumen-valor">
             {resumen.hechas}/{resumen.total}
           </div>
-          <div className="resumen-etiqueta">Tareas completadas</div>
-        </div>
+          <div className="resumen-etiqueta">
+            Tareas completadas {mostrarCompletadas ? "▲" : "▼"}
+          </div>
+        </button>
+
         <div className="resumen-tarjeta">
-          <div className="resumen-valor resumen-valor-rust">{resumen.vencidas}</div>
+          <div className="resumen-valor resumen-valor-oxido">{resumen.vencidas}</div>
           <div className="resumen-etiqueta">Tareas retrasadas</div>
         </div>
       </div>
+
+      {mostrarCompletadas && (
+        <section className="progreso-completadas">
+          <div className="progreso-completadas-titulo">Tareas ya realizadas</div>
+          {tareasCompletadas.length === 0 ? (
+            <div className="hoy-vacio">Todavía no se ha completado ninguna tarea.</div>
+          ) : (
+            <div className="hoy-lista">
+              {tareasCompletadas.map((t) => (
+                <FilaTarea key={t.id} tarea={t} mostrarEvento />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="progreso-lista">
         {eventos.map((evento) => {
@@ -68,7 +101,7 @@ export default function Progreso() {
               </div>
               <div className="progreso-tarjeta-insignias">
                 {retrasadas > 0 && (
-                  <span className="progreso-insignia progreso-insignia-rust">
+                  <span className="progreso-insignia progreso-insignia-oxido">
                     {retrasadas} retrasada{retrasadas > 1 ? "s" : ""}
                   </span>
                 )}

@@ -1,9 +1,10 @@
 import { NavLink } from "react-router-dom";
-import { useAutenticacion } from "../store/contextoAutenticacion";
+import { useAutenticacion } from "../almacen/contextoAutenticacion";
 import "./BarraLateral.css";
 
 const ENLACES = [
   { ruta: "/hoy", etiqueta: "Hoy", descripcion: "Qué exige atención" },
+  { ruta: "/eventos", etiqueta: "Eventos", descripcion: "Todos los eventos" },
   { ruta: "/crear", etiqueta: "Crear evento", descripcion: "Nuevo evento" },
   { ruta: "/progreso", etiqueta: "Progreso", descripcion: "Vista general" },
 ];
@@ -21,7 +22,7 @@ export default function BarraLateral() {
         </div>
       </div>
 
-      <nav className="barra-lateral-nav">
+      <nav className="barra-lateral-navegacion">
         {ENLACES.map((enlace) => (
           <NavLink
             key={enlace.ruta}
