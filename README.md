@@ -12,13 +12,6 @@ con una vista rápida de qué necesita atención hoy y del progreso general.
   `src/almacen/almacenEventos.js`. Sustituir ese archivo por llamadas a una API
   real es el único cambio necesario para conectar un backend después.
 
-Todo el texto propio del proyecto está en español: carpetas, componentes, funciones,
-props, variables de diseño (CSS), nombres de scripts y contenido. Lo único que queda
-en inglés es la sintaxis fija de las herramientas que no se puede renombrar sin
-romper el proyecto: palabras reservadas de JavaScript (`import`, `const`,
-`function`...), la API de React (`useState`, `children`, `onClick`...), etiquetas
-HTML/SVG (`div`, `button`, `svg`...), y nombres de archivo que npm/Vite exigen
-literalmente (`package.json`, `index.html`, `vite.config.js`).
 
 ## Rutas
 
@@ -50,9 +43,9 @@ literalmente (`package.json`, `index.html`, `vite.config.js`).
 ```bash
 npm install
 npm run dev           # servidor de desarrollo
-npm run construir     # build de producción en dist/
-npm run vistaprevia   # sirve el build de producción localmente
-npm run revisar       # linter (oxlint)
+npm run build     # build de producción en dist/
+npm run preview   # sirve el build de producción localmente
+npm run lint       # linter (oxlint)
 ```
 
 ## Estructura
