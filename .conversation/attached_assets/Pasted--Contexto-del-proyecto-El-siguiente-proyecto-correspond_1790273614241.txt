@@ -1,0 +1,192 @@
+## Contexto del proyecto
+
+El siguiente proyecto corresponde únicamente al **frontend desarrollado en React** para el proyecto descrito en el documento de especificaciones del miniproyecto.
+
+El `.zip` proporcionado contiene **solo el frontend**. El desarrollo, implementación y mantenimiento del **backend y de la API son responsabilidad de otro integrante o proceso**, por lo que **no debes desarrollar el backend ni la API**.
+
+Tu trabajo consiste exclusivamente en **revisar, completar, corregir, organizar y mejorar el frontend**, dejándolo preparado para que posteriormente las conexiones con el backend y la API puedan realizarse de forma sencilla y clara.
+
+El objetivo es que el proyecto quede terminado **hasta el alcance correspondiente a los Sprint 0 y Sprint 1**, de acuerdo con las especificaciones del documento del miniproyecto.
+
+---
+
+## 1. Revisión inicial del proyecto
+
+Antes de modificar el código:
+
+1. Revisa toda la estructura actual del proyecto.
+2. Identifica qué funcionalidades de los **Sprint 0 y 1** ya están implementadas.
+3. Identifica qué funcionalidades están incompletas, presentan errores o necesitan mejoras.
+4. Comprueba si existen diferencias entre la implementación actual y lo especificado en el documento.
+5. No elimines funcionalidades existentes simplemente porque necesiten cambios; **compleméntalas, corrígelas o mejóralas** cuando sea necesario.
+6. Mantén una estructura de código organizada y coherente para facilitar futuras modificaciones.
+
+Al finalizar, el frontend debe cubrir todo lo correspondiente a los Sprint 0 y 1 que pertenezca al frontend.
+
+---
+
+## 2. Diseño y apariencia
+
+La interfaz actual ya tiene una paleta de colores y un diseño base definidos.
+
+Por lo tanto:
+
+* **No cambies la paleta de colores existente.**
+* **No reemplaces el diseño base por uno completamente diferente.**
+* Mantén la apariencia general y la identidad visual actual.
+* Puedes mejorar distribución, espaciado, jerarquía visual, usabilidad, componentes, formularios, navegación y detalles de interfaz.
+* Las mejoras deben sentirse como una **evolución del diseño actual**, no como un rediseño completo.
+* No elimines elementos visuales o funcionalidades existentes sin una razón justificada.
+
+La prioridad es conservar el estilo general actual mientras se mejora su calidad, coherencia y funcionalidad.
+
+---
+
+## 3. Alcance técnico
+
+Este trabajo corresponde **únicamente al frontend**.
+
+### No debes:
+
+* Crear el backend.
+* Crear endpoints de API.
+* Implementar lógica del servidor.
+* Crear bases de datos.
+* Sustituir la responsabilidad del backend.
+
+### Sí debes:
+
+* Preparar el frontend para conectarse posteriormente al backend.
+* Mantener separada y clara la lógica relacionada con futuras solicitudes a la API.
+* Dejar estructuras, servicios, funciones, estados y componentes organizados para que conectar el backend después sea fácil.
+* Evitar acoplar innecesariamente la interfaz a datos estáticos cuando una futura conexión con la API vaya a reemplazarlos.
+
+Toda parte del código que esté relacionada con una futura conexión al backend debe quedar **ligeramente señalizada mediante un comentario corto y sencillo** para identificar dónde se realizará dicha conexión.
+
+No agregues comentarios innecesarios al resto del código.
+
+---
+
+## 4. Idioma del código
+
+Siempre que sea posible:
+
+* Utiliza nombres de variables en **español**.
+* Utiliza nombres de funciones, estados y estructuras en español cuando no exista una razón técnica para utilizar otro idioma.
+* Mantén los nombres claros, descriptivos y consistentes.
+
+No es necesario traducir elementos propios del framework o de librerías cuando hacerlo perjudique la claridad o sea contrario a las convenciones técnicas.
+
+---
+
+## 5. Funcionalidades de Sprint 0 y Sprint 1
+
+Revisa el documento del miniproyecto y asegúrate de implementar en el frontend **todo lo correspondiente a los Sprint 0 y 1**.
+
+Además de las funcionalidades que ya existan, verifica específicamente las siguientes:
+
+### Eventos
+
+Debe ser posible:
+
+* Crear eventos.
+* Reprogramar un evento de forma completa.
+* Modificar correctamente la información relevante de un evento.
+* Establecer la duración o el tiempo del evento.
+* Establecer delimitaciones o restricciones horarias asociadas al evento cuando correspondan.
+* Mostrar claramente los eventos activos.
+
+### Tareas y subtareas
+
+Debe ser posible:
+
+* Agregar tareas a un evento.
+* Crear y colocar todas las subtareas correspondientes.
+* Marcar o gestionar tareas completas.
+* Asociar correctamente las tareas con sus respectivos eventos.
+* Establecer el tiempo estimado de una tarea utilizando **horas** en lugar de un simple valor de reloj o formato ambiguo.
+* Mostrar claramente las tareas retrasadas.
+
+### Restricciones y planificación de tiempo
+
+La interfaz debe contemplar:
+
+* Delimitaciones de horas para las tareas.
+* Restricciones horarias que eviten que una tarea se programe cuando existe otra actividad incompatible.
+* Prevención visual o lógica de **sobrecargas de tiempo**.
+* Prevención de tareas cruzadas o solapadas cuando corresponda.
+* Una representación comprensible de la duración, horario y disponibilidad.
+
+Estas restricciones deben reflejarse correctamente en la interfaz, aunque la validación definitiva o lógica central pueda posteriormente depender del backend.
+
+### Etiquetas y gestión inmediata
+
+Cuando una tarea tenga una etiqueta o clasificación como **“Gestión inmediata”**, al pasar el cursor sobre ella debe mostrarse información adicional que explique claramente qué acción concreta requiere.
+
+Por ejemplo:
+
+> “Proveedor de streaming avisó retraso de equipo — reprogramar prueba técnica.”
+
+La información mostrada debe servir para que el usuario entienda qué significa la etiqueta y qué acción se espera que realice.
+
+No debe limitarse simplemente a mostrar el nombre de la etiqueta.
+
+### Menús y estados
+
+Los eventos y tareas deben contar con controles apropiados para su estado, incluyendo:
+
+* Un menú desplegable para consultar **eventos activos**.
+* Un menú o sección equivalente para consultar **tareas retrasadas**.
+* Visualización clara del estado de cada elemento.
+* Interacción intuitiva para consultar, modificar y gestionar estos elementos.
+
+---
+
+## 6. Revisión de funcionalidades existentes
+
+Para cada funcionalidad solicitada:
+
+1. Comprueba primero si ya existe.
+2. Si está correctamente implementada, mantenla y únicamente mejórala cuando sea necesario.
+3. Si está parcialmente implementada, complétala.
+4. Si tiene errores, corrígela.
+5. Si no existe y corresponde al alcance de Sprint 0 o Sprint 1, impleméntala.
+6. No dupliques componentes o funcionalidades innecesariamente.
+
+No asumas que algo está implementado solo porque exista visualmente. Verifica también su comportamiento e interacción dentro del frontend.
+
+---
+
+## 7. Preparación para el backend
+
+Aunque el backend no forma parte de este trabajo, el frontend debe quedar preparado para integrarlo posteriormente.
+
+Organiza de manera clara:
+
+* Datos que actualmente sean simulados.
+* Funciones que posteriormente realizarán peticiones.
+* Servicios o módulos de comunicación.
+* Estructuras de datos utilizadas por eventos y tareas.
+* Estados que posteriormente recibirán información desde la API.
+
+Las futuras conexiones deben poder realizarse modificando una cantidad reducida de código y sin tener que rehacer los componentes visuales.
+
+Las zonas destinadas a estas conexiones deben identificarse únicamente con **comentarios cortos y discretos**.
+
+---
+
+## 8. Calidad y resultado esperado
+
+Al finalizar:
+
+* El proyecto debe ejecutarse correctamente.
+* El frontend debe estar organizado.
+* No deben quedar errores evidentes provocados por las modificaciones.
+* Las funcionalidades de Sprint 0 y Sprint 1 correspondientes al frontend deben estar completas.
+* Las funcionalidades existentes deben conservarse, salvo que deban corregirse.
+* El diseño general debe conservarse.
+* La interfaz debe ser coherente y fácil de utilizar.
+* El código debe quedar preparado para una futura integración con backend/API.
+* Evita implementar funcionalidades pertenecientes a etapas posteriores si no son necesarias para completar Sprint 0 y Sprint 1.
+
+Finalmente, realiza una **revisión completa del proyecto** para comprobar que no hayas dejado funcionalidades solicitadas sin implementar, componentes desconectados, errores de interacción o partes importantes sin terminar.
