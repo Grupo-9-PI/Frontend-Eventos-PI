@@ -3,7 +3,7 @@ import { ArrowLeft, CalendarDays, Check, ChevronRight, Clock3, Compass, LayoutDa
 import { Link, Route, Router as WouterRouter, Switch, useLocation, useParams } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import NotFound from '@/pages/not-found';
-import { CATEGORIAS, combinarFechaHora, diferenciaDias, diferenciaDias as diasEntre, fechaBonita, fechaHoraBonita, generarId, hoyISO, repositorioEventos, sumarDias, tareasGlobales, type Evento, type EstadoSubtarea, type Prioridad, type Subtarea } from '@/lib/repositorioEventos';
+import { CATEGORIAS, combinarFechaHora, diferenciaDias, diferenciaDias as diasEntre, fechaHoraBonita, generarId, hoyISO, repositorioEventos, sumarDias, tareasGlobales, type Evento, type EstadoSubtarea, type Prioridad, type Subtarea } from '@/lib/repositorioEventos';
 import './index.css';
 
 type Aviso = { tipo: 'success' | 'error'; texto: string };
@@ -80,7 +80,7 @@ function useDatos() {
     if (!res.ok) { notifyError(res.error); return false; }
     await cargar(); notifySuccess('Gestión actualizada.'); return true;
   };
-  const eliminarSubtarea = async (eId: string, tId: string) => {
+  const eliminarSubtarea = async (_eId: string, tId: string) => {
     const res = await repositorioEventos.eliminarSubtarea(tId);
     if (!res.ok) { notifyError(res.error); return false; }
     await cargar(); notifySuccess('Gestión eliminada.'); return true;
@@ -193,7 +193,7 @@ function textoPlazo(tarea: Subtarea) {
 }
 function esInmediata(tarea: Subtarea) { return /streaming|inmediata/i.test(tarea.titulo); }
 
-function FilaTarea({ tarea, eventoId, mostrarEvento, onToggle, onReprogramar, onEditar, onEliminar }: { tarea: Subtarea; eventoId: string; mostrarEvento?: boolean; onToggle: () => void; onReprogramar: () => void; onEditar?: () => void; onEliminar?: () => void }) {
+function FilaTarea({ tarea, mostrarEvento, onToggle, onReprogramar, onEditar, onEliminar }: { tarea: Subtarea; mostrarEvento?: boolean; onToggle: () => void; onReprogramar: () => void; onEditar?: () => void; onEliminar?: () => void }) {
   const fecha = estadoFecha(tarea.fechaLimite);
   return <div className={'task-row ' + fecha}>
     <input className='task-check' type='checkbox' checked={tarea.estado === 'hecho'} onChange={onToggle} />
@@ -227,11 +227,11 @@ function Hoy() {
   const moverTarea = async (eventoId: string, tareaId: string, fecha: string, hora: string) => {
     const evento = eventos.find((e) => e.id === eventoId); if (!evento) return;
     const tarea = evento.subtareas.find((t) => t.id === tareaId); if (!tarea) return;
-    const problema = validarTarea(evento, { ...tarea, fechaLimite: fecha, horaLimite: hora }, evento.subtareas.filter((t) => t.id !== tareaId));
+    const problema = validarTarea(evento, { ...tarea, fechaLimite: fecha, horaLimite: hora });
     if (problema) { window.alert(problema); return; }
     if(await actualizarSubtarea(eventoId, { ...tarea, fechaLimite: fecha, horaLimite: hora })) setReprogramar(null);
   };
-  const bloque = (titulo: string, lista: typeof todas, clase = '') => <section className='hoy-section'><div className='section-head'><div className='section-title-row'><h2 className='section-title'>{titulo}</h2><span className='section-count'>{lista.length}</span></div>{titulo === 'Retrasadas' && <span className='tag tag-overdue'>Requieren decisión</span>}</div>{lista.length ? <div className='task-list'>{lista.map((t) => <FilaTarea key={t.id} tarea={t} eventoId={t.eventoId} mostrarEvento onToggle={() => cambiarEstado(t.eventoId, t.id)} onReprogramar={() => { const e = eventos.find((ev) => ev.id === t.eventoId); if (e) setReprogramar({ evento: e, tarea: t }); }} />)}</div> : <div className='card card-pad muted' style={{ fontSize: 12 }}>{clase || 'Nada en este grupo.'}</div>}</section>;
+  const bloque = (titulo: string, lista: typeof todas, clase = '') => <section className='hoy-section'><div className='section-head'><div className='section-title-row'><h2 className='section-title'>{titulo}</h2><span className='section-count'>{lista.length}</span></div>{titulo === 'Retrasadas' && <span className='tag tag-overdue'>Requieren decisión</span>}</div>{lista.length ? <div className='task-list'>{lista.map((t) => <FilaTarea key={t.id} tarea={t} mostrarEvento onToggle={() => cambiarEstado(t.eventoId, t.id)} onReprogramar={() => { const e = eventos.find((ev) => ev.id === t.eventoId); if (e) setReprogramar({ evento: e, tarea: t }); }} />)}</div> : <div className='card card-pad muted' style={{ fontSize: 12 }}>{clase || 'Nada en este grupo.'}</div>}</section>;
   return <div><Encabezado eyebrow='Panel de control' titulo='Hoy' descripcion={todas.length ? `${todas.length} gestiones abiertas.` : 'El plan está despejado.'} accion={<Link href='/crear' className='button button-primary'><Plus size={15} /> Crear evento</Link>} />{eventos.length === 0 ? <EmptyState titulo='Todavía no hay eventos' copy='Crea el primero.' accion={<Link href='/crear' className='button button-primary'>Crear evento</Link>} /> : todas.length === 0 ? <EmptyState titulo='No hay gestiones pendientes' copy='Todas las tareas están hechas.' accion={<Link href='/eventos' className='button button-secondary'>Ver eventos</Link>} /> : <>{bloque('Retrasadas', vencidas, 'No hay tareas retrasadas.')}{bloque('Para hoy', hoy, 'Nada vence hoy.')}{bloque('Próximas', proximas, 'No hay próximas gestiones.')}</>}{reprogramar && <ReprogramarDialog evento={reprogramar.evento} tarea={reprogramar.tarea} onClose={() => setReprogramar(null)} onSave={(fecha, hora) => moverTarea(reprogramar.evento.id, reprogramar.tarea.id, fecha, hora)} />}</div>;
 }
 
@@ -279,7 +279,7 @@ function validarDatosEvento(datos: FormEvento, tareas: BorradorTarea[]) {
   return e;
 }
 
-function validarTarea(evento: Evento, candidata: Subtarea, otras: Subtarea[]) {
+function validarTarea(evento: Evento, candidata: Subtarea) {
   const e: Record<string, string> = {};
   if (!candidata.titulo.trim()) e.titulo = 'El título es obligatorio.';
   if (!candidata.fechaLimite) e.fechaLimite = 'Elige fecha.';
@@ -290,9 +290,9 @@ function validarTarea(evento: Evento, candidata: Subtarea, otras: Subtarea[]) {
 }
 
 function DetalleEvento() {
-  const { id } = useParams<{ id: string }>(); const { eventos, actualizarSubtarea, eliminarSubtarea, eliminarEvento, crearSubtarea, actualizarEvento } = useStore();
+  const { id } = useParams<{ id: string }>(); const { eventos, actualizarSubtarea, eliminarSubtarea, eliminarEvento, crearSubtarea } = useStore();
   const [, setLocation] = useLocation(); const evento = eventos.find((e) => e.id === id);
-  const [mostrarAgregar, setMostrarAgregar] = useState(false); const [editar, setEditar] = useState(false); const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null); const [mover, setMover] = useState<Subtarea | null>(null);
+  const [mostrarAgregar, setMostrarAgregar] = useState(false); const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null); const [mover, setMover] = useState<Subtarea | null>(null);
   const [confirmarEliminar, setConfirmarEliminar] = useState<{ tipo: 'evento' | 'tarea', id: string, nombre: string } | null>(null);
 
   if (!evento) return <EmptyState titulo='Evento no encontrado' copy='Puede que haya sido eliminado.' accion={<Link href='/eventos' className='button button-secondary'>Volver a eventos</Link>} />;
@@ -312,17 +312,17 @@ function DetalleEvento() {
   };
 
   const pendientes = evento.subtareas.filter((t) => t.estado !== 'hecho'); const completadas = evento.subtareas.filter((t) => t.estado === 'hecho'); const porcentaje = calcularPorcentaje(evento);
-  return <div><Link href='/eventos' className='detail-back'><ArrowLeft size={14} /> Todos los eventos</Link><div className='detail-head'><div><h1 className='detail-title'>{evento.nombre}</h1></div><div className='detail-score'><div className='score-number'>{porcentaje}%</div></div></div><div className='detail-actions'><button className='button button-primary' onClick={() => setMostrarAgregar((v) => !v)}><Plus size={15} /> {mostrarAgregar ? 'Cerrar formulario' : 'Agregar gestión'}</button><button className='button button-danger' onClick={eliminarEv}><Trash2 size={14} /> Eliminar evento</button></div>{confirmarEliminar && <ConfirmDialog titulo={confirmarEliminar.tipo === 'evento' ? '¿Eliminar evento?' : '¿Eliminar gestión?'} mensaje={'Esta acción eliminará ' + (confirmarEliminar.tipo === 'evento' ? 'el evento y todas sus gestiones' : 'la gestión y toda su información') + '. No se puede deshacer.'} onClose={() => setConfirmarEliminar(null)} onConfirm={procesarEliminacion} />}{tareaEditar && <TaskEditorDialog evento={evento} tarea={tareaEditar} onClose={() => setTareaEditar(null)} onSave={async (t) => { if(await actualizarSubtarea(evento.id, t)) setTareaEditar(null); }} />}{mover && <ReprogramarDialog evento={evento} tarea={mover} onClose={() => setMover(null)} onSave={async (fecha, hora) => { if(await actualizarSubtarea(evento.id, { ...mover, fechaLimite: fecha, horaLimite: hora })) setMover(null); }} />}<div className='detail-layout'><section>{mostrarAgregar && <TaskEditor evento={evento} otras={evento.subtareas} onCancel={() => setMostrarAgregar(false)} onSave={async (t) => { const e = validarTarea(evento, t as Subtarea, evento.subtareas); if (e && Object.keys(e).length > 0) return false; if (await crearSubtarea(evento.id, t)) setMostrarAgregar(false); return true; }} />}{pendientes.length ? <div className='task-list'>{pendientes.map((t) => <FilaTarea key={t.id} tarea={t} eventoId={evento.id} onToggle={() => toggle(t)} onReprogramar={() => setMover(t)} onEditar={() => setTareaEditar(t)} onEliminar={() => eliminar(t)} />)}</div> : <EmptyState titulo='Plan despejado' copy='No hay gestiones pendientes.' />}{completadas.length > 0 && <div className='task-list'>{completadas.map((t) => <FilaTarea key={t.id} tarea={t} eventoId={evento.id} onToggle={() => toggle(t)} onReprogramar={() => setMover(t)} />)}</div>}</section></div></div>;
+  return <div><Link href='/eventos' className='detail-back'><ArrowLeft size={14} /> Todos los eventos</Link><div className='detail-head'><div><h1 className='detail-title'>{evento.nombre}</h1></div><div className='detail-score'><div className='score-number'>{porcentaje}%</div></div></div><div className='detail-actions'><button className='button button-primary' onClick={() => setMostrarAgregar((v) => !v)}><Plus size={15} /> {mostrarAgregar ? 'Cerrar formulario' : 'Agregar gestión'}</button><button className='button button-danger' onClick={eliminarEv}><Trash2 size={14} /> Eliminar evento</button></div>{confirmarEliminar && <ConfirmDialog titulo={confirmarEliminar.tipo === 'evento' ? '¿Eliminar evento?' : '¿Eliminar gestión?'} mensaje={'Esta acción eliminará ' + (confirmarEliminar.tipo === 'evento' ? 'el evento y todas sus gestiones' : 'la gestión y toda su información') + '. No se puede deshacer.'} onClose={() => setConfirmarEliminar(null)} onConfirm={procesarEliminacion} />}{tareaEditar && <TaskEditorDialog evento={evento} tarea={tareaEditar} onClose={() => setTareaEditar(null)} onSave={async (t) => { if(await actualizarSubtarea(evento.id, t)) setTareaEditar(null); }} />}{mover && <ReprogramarDialog evento={evento} tarea={mover} onClose={() => setMover(null)} onSave={async (fecha, hora) => { if(await actualizarSubtarea(evento.id, { ...mover, fechaLimite: fecha, horaLimite: hora })) setMover(null); }} />}<div className='detail-layout'><section>{mostrarAgregar && <TaskEditor evento={evento} onCancel={() => setMostrarAgregar(false)} onSave={async (t) => { const e = validarTarea(evento, t as Subtarea); if (e && Object.keys(e).length > 0) return false; if (await crearSubtarea(evento.id, t)) setMostrarAgregar(false); return true; }} />}{pendientes.length ? <div className='task-list'>{pendientes.map((t) => <FilaTarea key={t.id} tarea={t} onToggle={() => toggle(t)} onReprogramar={() => setMover(t)} onEditar={() => setTareaEditar(t)} onEliminar={() => eliminar(t)} />)}</div> : <EmptyState titulo='Plan despejado' copy='No hay gestiones pendientes.' />}{completadas.length > 0 && <div className='task-list'>{completadas.map((t) => <FilaTarea key={t.id} tarea={t} onToggle={() => toggle(t)} onReprogramar={() => setMover(t)} />)}</div>}</section></div></div>;
 }
 
-function TaskEditor({ evento, tarea: tareaInicial, otras, onCancel, onSave }: { evento: Evento; tarea?: Subtarea; otras: Subtarea[]; onCancel: () => void; onSave: (tarea: Omit<Subtarea, 'id'>) => Promise<boolean> }) {
+function TaskEditor({ evento, tarea: tareaInicial, onCancel, onSave }: { evento: Evento; tarea?: Subtarea; onCancel: () => void; onSave: (tarea: Omit<Subtarea, 'id'>) => Promise<boolean> }) {
   const [tarea, setTarea] = useState<Omit<Subtarea, 'id'>>(tareaInicial ?? { titulo: '', categoria: 'otro', prioridad: 'media', estado: 'pendiente', fechaLimite: evento.fechaInicio, horaLimite: '18:00', horaInicio: '', estimacion: 1 }); const [error, setError] = useState<Record<string, string>>({});
-  const submit = async (e: FormEvent) => { e.preventDefault(); const errs = validarTarea(evento, tarea as Subtarea, otras); if (Object.keys(errs).length > 0) { setError(errs); return; } await onSave({ ...tarea, estimacion: Number(tarea.estimacion) }); };
+  const submit = async (e: FormEvent) => { e.preventDefault(); const errs = validarTarea(evento, tarea as Subtarea); if (Object.keys(errs).length > 0) { setError(errs); return; } await onSave({ ...tarea, estimacion: Number(tarea.estimacion) }); };
   return <form className='card card-pad edit-panel' onSubmit={submit} style={{ marginBottom: 20 }}><div className='form-grid' style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}><div className='field' style={{ gridColumn: '1 / -1' }}><label>Qué hay que hacer *</label>{error.titulo && <div className='field-error'>{error.titulo}</div>}<input className={error.titulo ? 'error' : ''} value={tarea.titulo} onChange={(e) => setTarea({ ...tarea, titulo: e.target.value })} autoFocus /></div><div className='field'><label>Fecha límite *</label>{error.fechaLimite && <div className='field-error'>{error.fechaLimite}</div>}<input type='date' className={error.fechaLimite ? 'error' : ''} max={evento.fechaInicio} value={tarea.fechaLimite} onChange={(e) => setTarea({ ...tarea, fechaLimite: e.target.value })} /></div><div className='field'><label>Hora límite *</label>{error.horaLimite && <div className='field-error'>{error.horaLimite}</div>}<input type='time' className={error.horaLimite ? 'error' : ''} value={tarea.horaLimite} onChange={(e) => setTarea({ ...tarea, horaLimite: e.target.value })} /></div><div className='field'><label>Estimación (h) *</label>{error.estimacion && <div className='field-error'>{error.estimacion}</div>}<input type='number' className={error.estimacion ? 'error' : ''} min='0.25' step='0.25' value={tarea.estimacion} onChange={(e) => setTarea({ ...tarea, estimacion: Number(e.target.value) })} /></div></div>{error.general && <div className='error-box'>{error.general}</div>}<div className='form-actions'><button type='button' className='button button-ghost' onClick={onCancel}>Cancelar</button><button type='submit' className='button button-primary'>Guardar gestión</button></div></form>;
 }
 
 function TaskEditorDialog({ evento, tarea, onClose, onSave }: { evento: Evento; tarea?: Subtarea; onClose: () => void; onSave: (t: any) => Promise<void> }) {
-  return <div className='dialog-backdrop' onMouseDown={onClose}><div className='dialog' style={{ padding: '0', background: 'transparent', boxShadow: 'none' }} onMouseDown={(e) => e.stopPropagation()}><TaskEditor evento={evento} tarea={tarea} otras={tarea ? evento.subtareas.filter((t) => t.id !== tarea.id) : evento.subtareas} onCancel={onClose} onSave={async (t) => { await onSave(tarea ? { ...t, id: tarea.id } : t); return true; }} /></div></div>;
+  return <div className='dialog-backdrop' onMouseDown={onClose}><div className='dialog' style={{ padding: '0', background: 'transparent', boxShadow: 'none' }} onMouseDown={(e) => e.stopPropagation()}><TaskEditor evento={evento} tarea={tarea} onCancel={onClose} onSave={async (t) => { await onSave(tarea ? { ...t, id: tarea.id } : t); return true; }} /></div></div>;
 }
 
 function ConfirmDialog({ titulo, mensaje, onClose, onConfirm }: { titulo: string; mensaje: string; onClose: () => void; onConfirm: () => void }) {
@@ -331,8 +331,8 @@ function ConfirmDialog({ titulo, mensaje, onClose, onConfirm }: { titulo: string
 
 function ReprogramarDialog({ evento, tarea, onClose, onSave }: { evento: Evento; tarea: Subtarea; onClose: () => void; onSave: (fecha: string, hora: string) => void }) {
   const [fecha, setFecha] = useState(tarea.fechaLimite); const [hora, setHora] = useState(tarea.horaLimite); const [error, setError] = useState('');
-  const confirmar = (e: FormEvent) => { e.preventDefault(); const problema = validarTarea(evento, { ...tarea, fechaLimite: fecha, horaLimite: hora }, evento.subtareas.filter((t) => t.id !== tarea.id)); if (Object.keys(problema).length > 0) { setError('Asegúrate de colocar fecha y hora.'); return; } onSave(fecha, hora); };
-  return <div className='dialog-backdrop' onMouseDown={onClose}><form className='dialog' onSubmit={confirmar} onMouseDown={(e) => e.stopPropagation()}><div className='dialog-body'><div className='form-grid'><div className='field'><label>Nuevo plazo</label><input type='date' value={fecha} max={evento.fechaInicio} onChange={(e) => setFecha(e.target.value)} /></div><div className='field'><label>Nueva hora</label><input type='time' value={hora} onChange={(e) => setHora(e.target.value)} /></div></div>{error.general && <div className='error-box'>{error.general}</div>}</div><div className='form-actions'><button type='button' className='button button-ghost' onClick={onClose}>Cancelar</button><button type='submit' className='button button-primary'>Confirmar</button></div></form></div>;
+  const confirmar = (e: FormEvent) => { e.preventDefault(); const problema = validarTarea(evento, { ...tarea, fechaLimite: fecha, horaLimite: hora }); if (Object.keys(problema).length > 0) { setError('Asegúrate de colocar fecha y hora.'); return; } onSave(fecha, hora); };
+  return <div className='dialog-backdrop' onMouseDown={onClose}><form className='dialog' onSubmit={confirmar} onMouseDown={(e) => e.stopPropagation()}><div className='dialog-body'><div className='form-grid'><div className='field'><label>Nuevo plazo</label><input type='date' value={fecha} max={evento.fechaInicio} onChange={(e) => setFecha(e.target.value)} /></div><div className='field'><label>Nueva hora</label><input type='time' value={hora} onChange={(e) => setHora(e.target.value)} /></div></div>{error && <div className='error-box'>{error}</div>}</div><div className='form-actions'><button type='button' className='button button-ghost' onClick={onClose}>Cancelar</button><button type='submit' className='button button-primary'>Confirmar</button></div></form></div>;
 }
 
 function Progreso() {
