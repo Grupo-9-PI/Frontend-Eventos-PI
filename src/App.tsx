@@ -335,6 +335,58 @@ function ReprogramarDialog({ evento, tarea, onClose, onSave }: { evento: Evento;
   return <div className='dialog-backdrop' onMouseDown={onClose}><form className='dialog' onSubmit={confirmar} onMouseDown={(e) => e.stopPropagation()}><div className='dialog-body'><div className='form-grid'><div className='field'><label>Nuevo plazo</label><input type='date' value={fecha} max={evento.fechaInicio} onChange={(e) => setFecha(e.target.value)} /></div><div className='field'><label>Nueva hora</label><input type='time' value={hora} onChange={(e) => setHora(e.target.value)} /></div></div>{error.general && <div className='error-box'>{error.general}</div>}</div><div className='form-actions'><button type='button' className='button button-ghost' onClick={onClose}>Cancelar</button><button type='submit' className='button button-primary'>Confirmar</button></div></form></div>;
 }
 
-function Progreso() { return <div><Encabezado eyebrow='Progreso' titulo='Métricas' /></div>; }
+function Progreso() {
+  const { eventos } = useStore();
+  if (!eventos.length) return <div><Encabezado eyebrow='Progreso' titulo='Métricas' /><EmptyState titulo='Sin datos' copy='Aún no hay eventos registrados.' /></div>;
+
+  const totalEventos = eventos.length;
+  const eventosCompletados = eventos.filter(e => e.subtareas.length > 0 && e.subtareas.every(t => t.estado === 'hecho')).length;
+  const eventosActivos = totalEventos - eventosCompletados;
+
+  const todasTareas = eventos.flatMap(e => e.subtareas);
+  const totalTareas = todasTareas.length;
+  const tareasCompletadas = todasTareas.filter(t => t.estado === 'hecho').length;
+  
+  const porcentajeGlobal = totalTareas === 0 ? 0 : Math.round((tareasCompletadas / totalTareas) * 100);
+
+  return (
+    <div>
+      <Encabezado eyebrow='Progreso' titulo='Métricas globales' />
+      <div className='detail-layout' style={{ marginTop: '32px' }}>
+        <section>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '40px' }}>
+             <div className='card card-pad' style={{ background: 'rgba(111,174,134,0.06)', borderColor: 'rgba(111,174,134,0.2)' }}>
+               <div style={{ color: 'var(--salvia)', fontSize: '12px', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Progreso Global</div>
+               <div style={{ fontSize: '42px', color: 'var(--salvia)', fontWeight: 300 }}>{porcentajeGlobal}%</div>
+             </div>
+             <div className='card card-pad'>
+               <div style={{ color: 'var(--apagado)', fontSize: '12px', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>Eventos Activos</div>
+               <div style={{ fontSize: '42px', color: '#fff', fontWeight: 300 }}>{eventosActivos} <span style={{ fontSize: '16px', color: '#555' }}>/ {totalEventos}</span></div>
+             </div>
+             <div className='card card-pad'>
+               <div style={{ color: 'var(--apagado)', fontSize: '12px', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>Gestiones Completadas</div>
+               <div style={{ fontSize: '42px', color: '#fff', fontWeight: 300 }}>{tareasCompletadas} <span style={{ fontSize: '16px', color: '#555' }}>/ {totalTareas}</span></div>
+             </div>
+          </div>
+          <h3 style={{ fontSize: '18px', marginBottom: '16px', fontWeight: 500, color: '#e0e0e0' }}>Desglose por Evento</h3>
+          <div className='task-list'>
+            {eventos.map(e => {
+               const p = calcularPorcentaje(e);
+               return (
+                 <Link href={'/evento/' + e.id} key={e.id} className='task-row' style={{ gridTemplateColumns: 'minmax(0,1fr) auto', padding: '16px 20px', cursor: 'pointer', textDecoration: 'none' }}>
+                   <div>
+                     <div style={{ fontSize: '15px', fontWeight: 500, marginBottom: '6px', color: '#fff' }}>{e.nombre}</div>
+                     <div style={{ fontSize: '13px', color: 'var(--apagado)' }}>{e.subtareas.filter(t => t.estado === 'hecho').length} de {e.subtareas.length} gestiones completadas</div>
+                   </div>
+                   <div style={{ fontSize: '24px', color: p === 100 ? 'var(--salvia)' : '#e0e0e0', fontWeight: 300 }}>{p}%</div>
+                 </Link>
+               )
+            })}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
 
 export default App;
