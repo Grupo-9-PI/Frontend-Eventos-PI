@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, CircleAlert, Clock3, Compass, LayoutDashboard, ListChecks, MapPin, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, Clock3, Compass, LayoutDashboard, ListChecks, MapPin, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { Link, Route, Router as WouterRouter, Switch, useLocation, useParams } from "wouter";
 import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
@@ -82,12 +82,11 @@ function Shell() {
     <div className="app-shell">
       <aside className="sidebar" aria-label="Navegación principal">
         <Link href="/hoy" className="brand" data-testid="link-brand">
-          <span className="brand-mark">O</span><span><span className="brand-name">organiza</span><span className="brand-sub">independiente</span></span>
+          <span className="brand-mark">EO</span><span><span className="brand-name">EventOps</span><span className="brand-sub">mesa de control</span></span>
         </Link>
         <div className="nav-label">Espacio de trabajo</div>
         <nav className="nav-group">
           {nav.map(({ href, label, icon: Icon, count }) => <Link key={href} href={href} className={`nav-link${location === href ? " active" : ""}`} data-testid={`link-nav-${label.toLowerCase()}`}><Icon size={16} strokeWidth={1.7} /><span>{label}</span>{count && <span className="count">{count}</span>}</Link>)}
-          <Link href="/hoy#retrasadas" className="nav-link" data-testid="link-nav-retrasadas"><CircleAlert size={16} strokeWidth={1.7} /><span>Retrasadas</span>{retrasadas > 0 && <span className="count">{retrasadas}</span>}</Link>
         </nav>
         <div className="nav-label" style={{ marginTop: 28 }}>Acción</div>
         <Link href="/crear" className="nav-link" data-testid="link-nav-crear"><Plus size={16} strokeWidth={1.7} /><span>Crear evento</span></Link>
@@ -95,7 +94,7 @@ function Shell() {
       </aside>
       <div className="main-wrap">
         <header className="mobile-top">
-          <Link href="/hoy" className="brand" data-testid="link-mobile-brand"><span className="brand-mark">O</span><span className="brand-name">organiza</span></Link>
+          <Link href="/hoy" className="brand" data-testid="link-mobile-brand"><span className="brand-mark">EO</span><span className="brand-name">EventOps</span></Link>
           <nav className="mobile-menu">{nav.slice(0, 3).map(({ href, label, icon: Icon }) => <Link key={href} href={href} className={location === href ? "active" : ""} aria-label={label} data-testid={`link-mobile-${label.toLowerCase()}`}><Icon size={16} /></Link>)}</nav>
         </header>
         {!cargando && eventos.length > 0 && <div style={{ maxWidth: 1180, margin: "0 auto", padding: "16px 48px 0" }} className="active-picker">
