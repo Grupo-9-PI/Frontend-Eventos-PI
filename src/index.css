@@ -149,6 +149,8 @@ p { margin: 0; }
 .field.full { grid-column: 1 / -1; }
 .field label { color: #c3c3c3; font-size: 12px; font-weight: 500; }
 .field-hint { color: #777; font-size: 11px; }
+  .field-error { color: #d1512f; font-size: 11.5px; margin-top: -3px; }
+  input.error, select.error, textarea.error { background: rgba(209,81,47,.08) !important; border-color: #d1512f !important; }
 input, select, textarea { width: 100%; color: var(--papel); background: #1d1d1d; border: 1px solid var(--linea-fuerte); border-radius: var(--radio-pq); padding: 10px 11px; font-size: 13px; }
 input::placeholder, textarea::placeholder { color: #686868; }
 textarea { resize: vertical; min-height: 84px; }
