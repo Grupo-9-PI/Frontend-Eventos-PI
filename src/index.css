@@ -252,3 +252,4 @@ select option { background: #232323; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+.req { color: #d1512f; margin-left: 3px; }

@@ -199,3 +199,6 @@ export const repositorioEventos = {
 export function tareasGlobales(eventos: Evento[]) {
   return eventos.flatMap((evento) => evento.subtareas.map((subtarea) => ({ ...subtarea, eventoId: evento.id, eventoNombre: evento.nombre })));
 }
+  
+export function hoursToTime(h: number): string { if (!h) return '00:00'; const m = Math.round(h * 60); const hh = Math.floor(m / 60); const mm = m % 60; return hh.toString().padStart(2, '0') + ':' + mm.toString().padStart(2, '0'); }  
+export function timeToHours(t: string): number { if (!t) return 0; const parts = t.split(':'); return Number((parseInt(parts[0]) + parseInt(parts[1]) / 60).toFixed(2)); } 
