@@ -338,24 +338,7 @@ function DetalleEvento() {
 function TaskEditor({ evento, tarea: tareaInicial, onCancel, onSave }: { evento: Evento; tarea?: Subtarea; onCancel: () => void; onSave: (tarea: Omit<Subtarea, 'id'>) => Promise<boolean> }) {
   const [tarea, setTarea] = useState(tareaInicial ? { ...tareaInicial, estimacion: hoursToTime(tareaInicial.estimacion) } : { titulo: '', categoria: 'otro', prioridad: 'media' as Prioridad, estado: 'pendiente' as EstadoSubtarea, fechaLimite: evento.fechaInicio, horaLimite: '18:00', horaInicio: '', estimacion: '01:00' }); const [error, setError] = useState<Record<string, string>>({});
   
-    const aplicarPlanPredefinido = (tipoPlan: string) => {
-        if (!tipoPlan) return;
-        const plantillas: Record<string, any[]> = {
-            vacio: [],
-            conferencia: [
-                { titulo: 'Preparar presentación', categoria: 'otro', prioridad: 'alta', fechaLimite: datos.fechaInicio, horaLimite: '10:00', horaInicio: '', estimacion: '02:00' },
-                { titulo: 'Confirmar salón', categoria: 'salon', prioridad: 'alta', fechaLimite: datos.fechaInicio, horaLimite: '12:00', horaInicio: '', estimacion: '00:30' }
-            ],
-            fiesta: [
-                { titulo: 'Comprar decoración', categoria: 'otro', prioridad: 'media', fechaLimite: datos.fechaInicio, horaLimite: '15:00', horaInicio: '', estimacion: '01:00' },
-                { titulo: 'Confirmar catering', categoria: 'catering', prioridad: 'alta', fechaLimite: datos.fechaInicio, horaLimite: '12:00', horaInicio: '', estimacion: '00:30' }
-            ]
-        };
-        const tareasNuevas = (plantillas[tipoPlan] || []).map(t => ({ ...t, id: generarId('draft') }));
-        setTareas(tareasNuevas);
-    };
-
-    const submit = async (e: FormEvent) => { e.preventDefault(); const errs = validarTarea(evento, tarea as any as Subtarea); if (Object.keys(errs).length > 0) { setError(errs); return; } await onSave({ ...tarea, estimacion: timeToHours(tarea.estimacion as string) }); };
+const submit = async (e: FormEvent) => { e.preventDefault(); const errs = validarTarea(evento, tarea as any as Subtarea); if (Object.keys(errs).length > 0) { setError(errs); return; } await onSave({ ...tarea, estimacion: timeToHours(tarea.estimacion as string) }); };
   return <form className='card card-pad' onSubmit={submit}><div className='form-grid' style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}><div className='field' style={{ gridColumn: '1 / -1' }}><label>Qué hay que hacer  <span className='req'>*</span></label>{error.titulo && <div className='field-error'>{error.titulo}</div>}<input className={error.titulo ? 'error' : ''} value={tarea.titulo} onChange={(e) => setTarea({ ...tarea, titulo: e.target.value })} autoFocus /></div><div className='field'><label>Fecha límite  <span className='req'>*</span></label>{error.fechaLimite && <div className='field-error'>{error.fechaLimite}</div>}<input type='date' className={error.fechaLimite ? 'error' : ''} max={evento.fechaInicio} value={tarea.fechaLimite} onChange={(e) => setTarea({ ...tarea, fechaLimite: e.target.value })} /></div><div className='field'><label>Hora límite  <span className='req'>*</span></label>{error.horaLimite && <div className='field-error'>{error.horaLimite}</div>}<input type='time' className={error.horaLimite ? 'error' : ''} value={tarea.horaLimite} onChange={(e) => setTarea({ ...tarea, horaLimite: e.target.value })} /></div><div className='field'><label>Estimación (horas) <span className='req'>*</span></label>{error.estimacion && <div className='field-error'>{error.estimacion}</div>}<input type='text' pattern='^([0-9]{1,2}):([0-5][0-9])$' placeholder='00:00' className={error.estimacion ? 'error' : ''} value={tarea.estimacion} onChange={(e) => setTarea({ ...tarea, estimacion: e.target.value })} /></div></div>{error.general && <div className='error-box'>{error.general}</div>}<div className='form-actions'><button type='button' className='button button-ghost' onClick={onCancel}>Cancelar</button><button type='submit' className='button button-primary'>Guardar gestión</button></div></form>;
 }
 
