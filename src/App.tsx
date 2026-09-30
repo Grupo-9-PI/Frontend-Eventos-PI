@@ -699,7 +699,7 @@ function Hoy() {
       {eventos.length === 0 ? (
         <EmptyState
           titulo="Todavía no hay eventos"
-          copy="Crea el primero."
+          copy=""
           accion={
             <Link href="/crear" className="button button-primary">
               Crear evento
