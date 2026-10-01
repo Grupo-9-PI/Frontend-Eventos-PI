@@ -21,6 +21,8 @@
     --foreground: 0 0% 10%;
     --border: 0 0% 85%;
     --card: 0 0% 100%;
+    color-scheme: light;
+    accent-color: var(--primario);
 }
 
 :root {
@@ -53,6 +55,7 @@
   --input: 0 0% 12%;
   --ring: 207 55% 48%;
   color-scheme: dark;
+    accent-color: var(--primario);
 }
 
 * { box-sizing: border-box; }
