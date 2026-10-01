@@ -46,21 +46,29 @@ function hoy(): string {
   const local = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
 }
-export function hoyISO(): string { return hoy(); }
+export function hoyISO(): string {
+  return hoy();
+}
 export function sumarDias(fechaISO: string, dias: number): string {
   const fecha = new Date(`${fechaISO}T12:00:00`);
   fecha.setDate(fecha.getDate() + dias);
   return fecha.toISOString().slice(0, 10);
 }
 export function diferenciaDias(desde: string, hasta: string): number {
-  return Math.round((new Date(`${hasta}T12:00:00`).getTime() - new Date(`${desde}T12:00:00`).getTime()) / 86400000);
+  return Math.round(
+    (new Date(`${hasta}T12:00:00`).getTime() -
+      new Date(`${desde}T12:00:00`).getTime()) /
+      86400000,
+  );
 }
 export function combinarFechaHora(fecha: string, hora = "23:59"): number {
   return new Date(`${fecha}T${hora}:00`).getTime();
 }
 export function fechaBonita(fecha: string, incluirAnio = false): string {
   const texto = new Date(`${fecha}T12:00:00`).toLocaleDateString("es-CO", {
-    day: "numeric", month: "short", ...(incluirAnio ? { year: "numeric" } : {}),
+    day: "numeric",
+    month: "short",
+    ...(incluirAnio ? { year: "numeric" } : {}),
   });
   return texto.replace(".", "");
 }
@@ -84,7 +92,7 @@ function mapEventoFromApi(e: any): Evento {
     lugar: e.lugar,
     notas: e.notas_produccion || "",
     capacidadDiaria: Number(e.limite_diario_horas),
-    creadoEn: e.creado_en ? e.creado_en.slice(0,10) : hoyISO(),
+    creadoEn: e.creado_en ? e.creado_en.slice(0, 10) : hoyISO(),
     subtareas: (e.subtareas || []).map(mapSubtareaFromApi),
   };
 }
@@ -102,7 +110,7 @@ function mapSubtareaFromApi(t: any): Subtarea {
   };
 }
 
-function mapEventoToApi(e: Omit<Evento, "id"|"subtareas"|"creadoEn">) {
+function mapEventoToApi(e: Omit<Evento, "id" | "subtareas" | "creadoEn">) {
   return {
     nombre: e.nombre,
     tipo: e.tipo,
@@ -133,29 +141,47 @@ function mapSubtareaToApi(eventoId: string, t: Omit<Subtarea, "id">) {
 export const repositorioEventos = {
   async cargar(): Promise<Resultado<Evento[]>> {
     try {
-      const response = await api.get('/eventos/');
+      const response = await api.get("/eventos/");
       return { ok: true, data: response.data.map(mapEventoFromApi) };
     } catch (e: any) {
       console.error(e);
-      return { ok: false, error: "No se pudo cargar los eventos desde el servidor." };
+      return {
+        ok: false,
+        error: "No se pudo cargar los eventos desde el servidor.",
+      };
     }
   },
 
-  async crearEvento(evento: Omit<Evento, "id"|"subtareas"|"creadoEn">): Promise<Resultado<Evento>> {
+  async crearEvento(
+    evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
+  ): Promise<Resultado<Evento>> {
     try {
-      const response = await api.post('/eventos/', mapEventoToApi(evento));
+      const response = await api.post("/eventos/", mapEventoToApi(evento));
       return { ok: true, data: mapEventoFromApi(response.data) };
     } catch (e: any) {
-      return { ok: false, error: e.response?.data ? JSON.stringify(e.response.data) : "Error al crear evento." };
+      return {
+        ok: false,
+        error: e.response?.data
+          ? JSON.stringify(e.response.data)
+          : "Error al crear evento.",
+      };
     }
   },
 
-  async actualizarEvento(id: string, evento: Omit<Evento, "id"|"subtareas"|"creadoEn">): Promise<Resultado<Evento>> {
+  async actualizarEvento(
+    id: string,
+    evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
+  ): Promise<Resultado<Evento>> {
     try {
       const response = await api.put(`/eventos/${id}/`, mapEventoToApi(evento));
       return { ok: true, data: mapEventoFromApi(response.data) };
     } catch (e: any) {
-      return { ok: false, error: e.response?.data ? JSON.stringify(e.response.data) : "Error al actualizar evento." };
+      return {
+        ok: false,
+        error: e.response?.data
+          ? JSON.stringify(e.response.data)
+          : "Error al actualizar evento.",
+      };
     }
   },
 
@@ -168,21 +194,43 @@ export const repositorioEventos = {
     }
   },
 
-  async crearSubtarea(eventoId: string, subtarea: Omit<Subtarea, "id">): Promise<Resultado<Subtarea>> {
+  async crearSubtarea(
+    eventoId: string,
+    subtarea: Omit<Subtarea, "id">,
+  ): Promise<Resultado<Subtarea>> {
     try {
-      const response = await api.post('/subtareas/', mapSubtareaToApi(eventoId, subtarea));
+      const response = await api.post(
+        "/subtareas/",
+        mapSubtareaToApi(eventoId, subtarea),
+      );
       return { ok: true, data: mapSubtareaFromApi(response.data) };
     } catch (e: any) {
-      return { ok: false, error: e.response?.data ? JSON.stringify(e.response.data) : "Error al crear gestión." };
+      return {
+        ok: false,
+        error: e.response?.data
+          ? JSON.stringify(e.response.data)
+          : "Error al crear gestión.",
+      };
     }
   },
 
-  async actualizarSubtarea(eventoId: string, subtarea: Subtarea): Promise<Resultado<Subtarea>> {
+  async actualizarSubtarea(
+    eventoId: string,
+    subtarea: Subtarea,
+  ): Promise<Resultado<Subtarea>> {
     try {
-      const response = await api.put(`/subtareas/${subtarea.id}/`, mapSubtareaToApi(eventoId, subtarea));
+      const response = await api.put(
+        `/subtareas/${subtarea.id}/`,
+        mapSubtareaToApi(eventoId, subtarea),
+      );
       return { ok: true, data: mapSubtareaFromApi(response.data) };
     } catch (e: any) {
-      return { ok: false, error: e.response?.data ? JSON.stringify(e.response.data) : "Error al actualizar gestión." };
+      return {
+        ok: false,
+        error: e.response?.data
+          ? JSON.stringify(e.response.data)
+          : "Error al actualizar gestión.",
+      };
     }
   },
 
@@ -193,12 +241,28 @@ export const repositorioEventos = {
     } catch (e: any) {
       return { ok: false, error: "Error al eliminar gestión." };
     }
-  }
+  },
 };
 
 export function tareasGlobales(eventos: Evento[]) {
-  return eventos.flatMap((evento) => evento.subtareas.map((subtarea) => ({ ...subtarea, eventoId: evento.id, eventoNombre: evento.nombre })));
+  return eventos.flatMap((evento) =>
+    evento.subtareas.map((subtarea) => ({
+      ...subtarea,
+      eventoId: evento.id,
+      eventoNombre: evento.nombre,
+    })),
+  );
 }
-  
-export function hoursToTime(h: number): string { if (!h) return '00:00'; const m = Math.round(h * 60); const hh = Math.floor(m / 60); const mm = m % 60; return hh.toString().padStart(2, '0') + ':' + mm.toString().padStart(2, '0'); }  
-export function timeToHours(t: string): number { if (!t) return 0; const parts = t.split(':'); return Number((parseInt(parts[0]) + parseInt(parts[1]) / 60).toFixed(2)); } 
+
+export function hoursToTime(h: number): string {
+  if (!h) return "00:00";
+  const m = Math.round(h * 60);
+  const hh = Math.floor(m / 60);
+  const mm = m % 60;
+  return hh.toString().padStart(2, "0") + ":" + mm.toString().padStart(2, "0");
+}
+export function timeToHours(t: string): number {
+  if (!t) return 0;
+  const parts = t.split(":");
+  return Number((parseInt(parts[0]) + parseInt(parts[1]) / 60).toFixed(2));
+}

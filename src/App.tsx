@@ -22,6 +22,8 @@ import {
   RotateCcw,
   Trash2,
   X,
+  Sun,
+  Moon,
 } from "lucide-react";
 import {
   Link,
@@ -225,6 +227,9 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
 }
 
 function Shell() {
+  const [tema, setTema] = useState(
+    () => document.documentElement.getAttribute("data-theme") || "dark",
+  );
   const { eventos, cargando } = useStore();
   const [location, setLocation] = useLocation();
   const globales = tareasGlobales(eventos);
@@ -287,10 +292,70 @@ function Shell() {
           <Plus size={16} strokeWidth={1.7} />
           <span>Crear evento</span>
         </Link>
-        <div className="sidebar-footer">
-          Planifica con claridad.
-          <br />
-          Una gestión a la vez.
+        <div className="sidebar-footer" style={{ border: "none" }}></div>
+        <div
+          style={{
+            marginTop: "auto",
+            paddingTop: "20px",
+            borderTop: "1px solid var(--linea)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: 15,
+            }}
+          >
+            <button
+              onClick={() => {
+                const t = tema === "light" ? "dark" : "light";
+                document.documentElement.setAttribute("data-theme", t);
+                localStorage.setItem("tema", t);
+                setTema(t);
+              }}
+              title="Alternar modo claro/oscuro"
+              style={{
+                background: tema === "light" ? "#e2e8f0" : "#1e293b",
+                border: "none",
+                borderRadius: 20,
+                width: 50,
+                height: 26,
+                display: "flex",
+                alignItems: "center",
+                padding: 3,
+                cursor: "pointer",
+                justifyContent: tema === "light" ? "flex-start" : "flex-end",
+                transition: "all 0.2s ease",
+              }}
+            >
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: "50%",
+                  background: tema === "light" ? "#fff" : "#fff",
+                  color: tema === "light" ? "#e2e8f0" : "#1e293b",
+                  display: "grid",
+                  placeItems: "center",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                }}
+              >
+                {tema === "light" ? (
+                  <Sun size={12} color="#000" />
+                ) : (
+                  <Moon size={12} color="#000" />
+                )}
+              </div>
+            </button>
+          </div>
+          <button
+            className="button button-danger"
+            style={{ width: "100%", justifyContent: "center" }}
+            onClick={() => (window as any).performLogout()}
+          >
+            Cerrar sesión
+          </button>
         </div>
       </aside>
       <div className="main-wrap">
@@ -311,6 +376,57 @@ function Shell() {
               </Link>
             ))}
           </nav>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={() => {
+                const t = tema === "light" ? "dark" : "light";
+                document.documentElement.setAttribute("data-theme", t);
+                localStorage.setItem("tema", t);
+                setTema(t);
+              }}
+              style={{
+                background: tema === "light" ? "#e2e8f0" : "#1e293b",
+                border: "none",
+                borderRadius: 20,
+                width: 50,
+                height: 26,
+                display: "flex",
+                alignItems: "center",
+                padding: 3,
+                cursor: "pointer",
+                justifyContent: tema === "light" ? "flex-start" : "flex-end",
+                transition: "all 0.2s ease",
+              }}
+            >
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: "50%",
+                  background: "#fff",
+                  display: "grid",
+                  placeItems: "center",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                }}
+              >
+                {tema === "light" ? (
+                  <Sun size={12} color="#000" />
+                ) : (
+                  <Moon size={12} color="#000" />
+                )}
+              </div>
+            </button>
+            <button
+              onClick={() => (window as any).performLogout()}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--oxido)",
+              }}
+            >
+              Salir
+            </button>
+          </div>
         </header>
         {!cargando && eventos.length > 0 && (
           <div
@@ -741,12 +857,20 @@ function Eventos() {
   const { eventos } = useStore();
   const [filtro, setFiltro] = useState("activos");
   const lista = eventos
-    .filter(
-      (e) =>
-        filtro === "todos" ||
+    .filter((e) => {
+      if (filtro === "todos") return true;
+      const isActivo =
         diferenciaDias(hoyISO(), e.fechaInicio) >= 0 ||
-        e.subtareas.some((t) => t.estado !== "hecho"),
-    )
+        e.subtareas.some((t) => t.estado !== "hecho");
+      const isPasado =
+        diferenciaDias(hoyISO(), e.fechaInicio) < 0 &&
+        e.subtareas.every((t) => t.estado === "hecho");
+      if (filtro === "activos") return isActivo;
+      if (filtro === "pasados") return isPasado;
+      if (filtro === "cancelados") return false;
+      if (filtro === "retrasados") return false;
+      return true;
+    })
     .sort((a, b) => a.fechaInicio.localeCompare(b.fechaInicio));
   return (
     <div>
@@ -763,6 +887,9 @@ function Eventos() {
       <div className="filter-row" style={{ marginBottom: 18 }}>
         <select value={filtro} onChange={(e) => setFiltro(e.target.value)}>
           <option value="activos">Activos</option>
+          <option value="pasados">Pasados</option>
+          <option value="cancelados">Cancelados</option>
+          <option value="retrasados">Retrasados</option>
           <option value="todos">Todos los eventos</option>
         </select>
         <span className="muted" style={{ fontSize: 12 }}>
@@ -913,8 +1040,9 @@ function CrearEvento() {
   };
   const añadirTarea = () => {
     const errs: Record<string, string> = {};
-    if (!nuevo.titulo.trim()) errs.titulo = 'Obligatorio.';
-    if (!nuevo.estimacion.trim() || nuevo.estimacion === '00:00') errs.estimacion = 'Obligatorio.';
+    if (!nuevo.titulo.trim()) errs.titulo = "Obligatorio.";
+    if (!nuevo.estimacion.trim() || nuevo.estimacion === "00:00")
+      errs.estimacion = "Obligatorio.";
     if (Object.keys(errs).length > 0) {
       setErrorNuevo(errs);
       return;
@@ -1000,25 +1128,26 @@ function CrearEvento() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError({});
-    
-      if (mostrarPlan && !tareas.length && nuevo.titulo.trim()) {
-        const errs: Record<string, string> = {};
-        if (!nuevo.titulo.trim()) errs.titulo = 'Obligatorio.';
-        if (!nuevo.estimacion.trim() || nuevo.estimacion === '00:00') errs.estimacion = 'Obligatorio.';
-        if (Object.keys(errs).length > 0) {
-          setErrorNuevo(errs);
-        } else {
-          setTareas((ts) => [...ts, { ...nuevo, id: generarId("draft") }]);
-          setNuevo(borradorInicial());
-          setErrorNuevo({});
-        }
+
+    if (mostrarPlan && !tareas.length && nuevo.titulo.trim()) {
+      const errs: Record<string, string> = {};
+      if (!nuevo.titulo.trim()) errs.titulo = "Obligatorio.";
+      if (!nuevo.estimacion.trim() || nuevo.estimacion === "00:00")
+        errs.estimacion = "Obligatorio.";
+      if (Object.keys(errs).length > 0) {
+        setErrorNuevo(errs);
+      } else {
+        setTareas((ts) => [...ts, { ...nuevo, id: generarId("draft") }]);
+        setNuevo(borradorInicial());
+        setErrorNuevo({});
       }
-      
-      const validacion = validarDatosEvento(datos, tareas, mostrarPlan);
-      
-      if (mostrarPlan && !tareas.length && Object.keys(errorNuevo).length === 0) {
-        setErrorNuevo({ titulo: 'Obligatorio', estimacion: 'Obligatorio' });
-      }
+    }
+
+    const validacion = validarDatosEvento(datos, tareas, mostrarPlan);
+
+    if (mostrarPlan && !tareas.length && Object.keys(errorNuevo).length === 0) {
+      setErrorNuevo({ titulo: "Obligatorio", estimacion: "Obligatorio" });
+    }
 
     if (Object.keys(validacion).length > 0) {
       setError(validacion);
@@ -1045,7 +1174,12 @@ function CrearEvento() {
       horaInicio: t.horaInicio || undefined,
       estimacion: timeToHours(t.estimacion),
     }));
-    if (!window.confirm("¿Confirmas la creación de este evento y su plan de gestiones?")) return;
+    if (
+      !window.confirm(
+        "¿Confirmas la creación de este evento y su plan de gestiones?",
+      )
+    )
+      return;
     const id = await crearEventoCompleto(eventoPayload, tareasPayload);
     if (id) setLocation("/evento/" + id);
   };
@@ -1295,10 +1429,14 @@ function CrearEvento() {
                   style={{ gridTemplateColumns: "1fr 1fr" }}
                 >
                   <div className="field">
-                    <label>Nueva gestión <span className="req">*</span></label>
-                    {errorNuevo.titulo && <div className='field-error'>{errorNuevo.titulo}</div>}
+                    <label>
+                      Nueva gestión <span className="req">*</span>
+                    </label>
+                    {errorNuevo.titulo && (
+                      <div className="field-error">{errorNuevo.titulo}</div>
+                    )}
                     <input
-                      className={errorNuevo.titulo ? 'error' : ''}
+                      className={errorNuevo.titulo ? "error" : ""}
                       value={nuevo.titulo}
                       onChange={(e) =>
                         setNuevo({ ...nuevo, titulo: e.target.value })
@@ -1306,11 +1444,15 @@ function CrearEvento() {
                     />
                   </div>
                   <div className="field">
-                    <label>Estimación (horas) <span className="req">*</span></label>
-                    {errorNuevo.estimacion && <div className='field-error'>{errorNuevo.estimacion}</div>}
+                    <label>
+                      Estimación (horas) <span className="req">*</span>
+                    </label>
+                    {errorNuevo.estimacion && (
+                      <div className="field-error">{errorNuevo.estimacion}</div>
+                    )}
                     <input
                       type="text"
-                      className={errorNuevo.estimacion ? 'error' : ''}
+                      className={errorNuevo.estimacion ? "error" : ""}
                       pattern="^([0-9]{1,2}):([0-5][0-9])$"
                       placeholder="00:00"
                       value={nuevo.estimacion}
@@ -1359,7 +1501,11 @@ function CrearEvento() {
   );
 }
 
-function validarDatosEvento(datos: FormEvento, tareas: BorradorTarea[], mostrarPlan: boolean) {
+function validarDatosEvento(
+  datos: FormEvento,
+  tareas: BorradorTarea[],
+  mostrarPlan: boolean,
+) {
   const e: Record<string, string> = {};
   if (!datos.nombre.trim()) e.nombre = "El nombre es obligatorio.";
   if (!datos.lugar.trim()) e.lugar = "El lugar es obligatorio.";
@@ -1371,7 +1517,9 @@ function validarDatosEvento(datos: FormEvento, tareas: BorradorTarea[], mostrarP
   if (timeToHours(datos.duracion) <= 0) e.duracion = "Requerida.";
 
   if (!datos.horaEvento) e.horaEvento = "Obligatoria.";
-  if (mostrarPlan && !tareas.length) e.general = "Agrega al menos una gestión. Haz clic en '+ Agregar' o cancela la creación del plan.";
+  if (mostrarPlan && !tareas.length)
+    e.general =
+      "Agrega al menos una gestión. Haz clic en '+ Agregar plan inicial' o cancela la creación del plan.";
   return e;
 }
 

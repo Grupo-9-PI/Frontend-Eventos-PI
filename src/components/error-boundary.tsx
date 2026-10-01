@@ -3,7 +3,7 @@ import {
   type ComponentType,
   type ErrorInfo,
   type ReactNode,
-} from 'react';
+} from "react";
 
 export interface ErrorFallbackProps {
   error: Error;
@@ -25,7 +25,7 @@ function toError(value: unknown): Error {
   if (value instanceof Error) {
     return value;
   }
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     return new Error(value);
   }
   try {
@@ -37,15 +37,32 @@ function toError(value: unknown): Error {
 
 function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
   return (
-    <div className="empty" style={{ minHeight: "100vh", display: "grid", placeContent: "center", border: 0 }}>
+    <div
+      className="empty"
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeContent: "center",
+        border: 0,
+      }}
+    >
       <div>
         <h1 className="empty-title">Algo interrumpió este plan</h1>
         <p className="empty-copy">
-          Esta vista encontró un error. Puedes reintentarlo sin perder los datos guardados localmente.
+          Esta vista encontró un error. Puedes reintentarlo sin perder los datos
+          guardados localmente.
         </p>
         {/* Dev only: messages can carry API responses and other internals. */}
         {import.meta.env.DEV ? (
-          <pre className="card card-pad" style={{ overflowX: "auto", textAlign: "left", fontSize: 11, color: "#c8c8c8" }}>
+          <pre
+            className="card card-pad"
+            style={{
+              overflowX: "auto",
+              textAlign: "left",
+              fontSize: 11,
+              color: "#c8c8c8",
+            }}
+          >
             {error.message || String(error)}
           </pre>
         ) : null}
@@ -74,7 +91,7 @@ export class ErrorBoundary extends Component<
 
   componentDidCatch(error: unknown, info: ErrorInfo): void {
     console.error(
-      'ErrorBoundary caught an error:',
+      "ErrorBoundary caught an error:",
       toError(error),
       info.componentStack,
     );
