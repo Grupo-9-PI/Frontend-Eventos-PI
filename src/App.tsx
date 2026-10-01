@@ -22,6 +22,8 @@ import {
   RotateCcw,
   Trash2,
   X,
+  Sun,
+  Moon,
 } from "lucide-react";
 import {
   Link,
@@ -225,6 +227,7 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
 }
 
 function Shell() {
+  const [tema, setTema] = useState(() => document.documentElement.getAttribute('data-theme') || 'dark');
   const { eventos, cargando } = useStore();
   const [location, setLocation] = useLocation();
   const globales = tareasGlobales(eventos);
@@ -287,19 +290,38 @@ function Shell() {
           <Plus size={16} strokeWidth={1.7} />
           <span>Crear evento</span>
         </Link>
-        <div className="sidebar-footer">
-          Planifica con claridad.
-          <br />
-          Una gestión a la vez.
-          </div>
+        <div className="sidebar-footer" style={{ border: "none" }}></div>
           <div style={{ marginTop: 'auto', paddingTop: '20px', borderTop: '1px solid var(--linea)' }}>
-            <button className="button button-ghost" style={{ width: '100%', marginBottom: 10, justifyContent: 'center', fontSize: '20px' }} onClick={() => {
-              const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-              document.documentElement.setAttribute('data-theme', t);
-              localStorage.setItem('tema', t);
-            }} title="Alternar modo claro/oscuro">
-              🌗
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 15 }}>
+            <button
+              onClick={() => {
+                const t = tema === 'light' ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-theme', t);
+                localStorage.setItem('tema', t);
+                setTema(t);
+              }}
+              title="Alternar modo claro/oscuro"
+              style={{
+                background: tema === 'light' ? '#e2e8f0' : '#1e293b',
+                border: 'none',
+                borderRadius: 20,
+                width: 50,
+                height: 26,
+                display: 'flex',
+                alignItems: 'center',
+                padding: 3,
+                cursor: 'pointer',
+                justifyContent: tema === 'light' ? 'flex-start' : 'flex-end',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div style={{
+                width: 20, height: 20, borderRadius: '50%', background: tema === 'light' ? '#fff' : '#fff', color: tema === 'light' ? '#e2e8f0' : '#1e293b', display: 'grid', placeItems: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+              }}>
+                {tema === 'light' ? <Sun size={12} color="#000" /> : <Moon size={12} color="#000" />}
+              </div>
             </button>
+          </div>
             <button className="button button-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={() => (window as any).performLogout()}>
               Cerrar sesión
             </button>
@@ -324,7 +346,33 @@ function Shell() {
             ))}
                       </nav>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => { const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'; document.documentElement.setAttribute('data-theme', t); localStorage.setItem('tema', t); }} style={{ background: 'none', border: 'none', color: 'var(--papel)', fontSize: 20 }}>🌗</button>
+              <button
+              onClick={() => {
+                const t = tema === 'light' ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-theme', t);
+                localStorage.setItem('tema', t);
+                setTema(t);
+              }}
+              style={{
+                background: tema === 'light' ? '#e2e8f0' : '#1e293b',
+                border: 'none',
+                borderRadius: 20,
+                width: 50,
+                height: 26,
+                display: 'flex',
+                alignItems: 'center',
+                padding: 3,
+                cursor: 'pointer',
+                justifyContent: tema === 'light' ? 'flex-start' : 'flex-end',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div style={{
+                width: 20, height: 20, borderRadius: '50%', background: '#fff', display: 'grid', placeItems: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+              }}>
+                {tema === 'light' ? <Sun size={12} color="#000" /> : <Moon size={12} color="#000" />}
+              </div>
+            </button>
               <button onClick={() => (window as any).performLogout()} style={{ background: 'none', border: 'none', color: 'var(--oxido)' }}>Salir</button>
             </div>
           </header>
