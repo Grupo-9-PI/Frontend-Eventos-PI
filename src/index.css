@@ -3,7 +3,7 @@
 @import "tw-animate-css";
 
 
-[data-theme='light'] {
+:root[data-theme='light'] {
     --tinta: #f4f5f7;
     --panel: #ffffff;
     --panel-elevado: #fdfdfd;

@@ -31,6 +31,8 @@ export default function Root() {
 
   const logout = () => {
     setLoggedIn(false);
+    setUsername('');
+    setPassword('');
     localStorage.removeItem('logged_in');
   };
 

@@ -293,12 +293,12 @@ function Shell() {
           Una gestión a la vez.
           </div>
           <div style={{ marginTop: 'auto', paddingTop: '20px', borderTop: '1px solid var(--linea)' }}>
-            <button className="button button-ghost" style={{ width: '100%', marginBottom: 10, justifyContent: 'center' }} onClick={() => {
+            <button className="button button-ghost" style={{ width: '100%', marginBottom: 10, justifyContent: 'center', fontSize: '20px' }} onClick={() => {
               const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
               document.documentElement.setAttribute('data-theme', t);
               localStorage.setItem('tema', t);
-            }}>
-              Alternar Tema
+            }} title="Alternar modo claro/oscuro">
+              🌗
             </button>
             <button className="button button-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={() => (window as any).performLogout()}>
               Cerrar sesión
