@@ -291,7 +291,19 @@ function Shell() {
           Planifica con claridad.
           <br />
           Una gestión a la vez.
-        </div>
+          </div>
+          <div style={{ marginTop: 'auto', paddingTop: '20px', borderTop: '1px solid var(--linea)' }}>
+            <button className="button button-ghost" style={{ width: '100%', marginBottom: 10, justifyContent: 'center' }} onClick={() => {
+              const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+              document.documentElement.setAttribute('data-theme', t);
+              localStorage.setItem('tema', t);
+            }}>
+              Alternar Tema
+            </button>
+            <button className="button button-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={() => (window as any).performLogout()}>
+              Cerrar sesión
+            </button>
+          </div>
       </aside>
       <div className="main-wrap">
         <header className="mobile-top">
@@ -310,9 +322,13 @@ function Shell() {
                 <Icon size={16} />
               </Link>
             ))}
-          </nav>
-        </header>
-        {!cargando && eventos.length > 0 && (
+                      </nav>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => { const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'; document.documentElement.setAttribute('data-theme', t); localStorage.setItem('tema', t); }} style={{ background: 'none', border: 'none', color: 'var(--papel)', fontSize: 20 }}>🌗</button>
+              <button onClick={() => (window as any).performLogout()} style={{ background: 'none', border: 'none', color: 'var(--oxido)' }}>Salir</button>
+            </div>
+          </header>
+          {!cargando && eventos.length > 0 && (
           <div
             style={{ maxWidth: 1180, margin: "0 auto", padding: "16px 48px 0" }}
             className="active-picker"
@@ -741,12 +757,16 @@ function Eventos() {
   const { eventos } = useStore();
   const [filtro, setFiltro] = useState("activos");
   const lista = eventos
-    .filter(
-      (e) =>
-        filtro === "todos" ||
-        diferenciaDias(hoyISO(), e.fechaInicio) >= 0 ||
-        e.subtareas.some((t) => t.estado !== "hecho"),
-    )
+      .filter((e) => {
+        if (filtro === "todos") return true;
+        const isActivo = diferenciaDias(hoyISO(), e.fechaInicio) >= 0 || e.subtareas.some((t) => t.estado !== "hecho");
+        const isPasado = diferenciaDias(hoyISO(), e.fechaInicio) < 0 && e.subtareas.every((t) => t.estado === "hecho");
+        if (filtro === "activos") return isActivo;
+        if (filtro === "pasados") return isPasado;
+        if (filtro === "cancelados") return false;
+        if (filtro === "retrasados") return false;
+        return true;
+      })
     .sort((a, b) => a.fechaInicio.localeCompare(b.fechaInicio));
   return (
     <div>
@@ -762,9 +782,12 @@ function Eventos() {
       />
       <div className="filter-row" style={{ marginBottom: 18 }}>
         <select value={filtro} onChange={(e) => setFiltro(e.target.value)}>
-          <option value="activos">Activos</option>
-          <option value="todos">Todos los eventos</option>
-        </select>
+            <option value="activos">Activos</option>
+            <option value="pasados">Pasados</option>
+            <option value="cancelados">Cancelados</option>
+            <option value="retrasados">Retrasados</option>
+            <option value="todos">Todos los eventos</option>
+          </select>
         <span className="muted" style={{ fontSize: 12 }}>
           {lista.length} visible
         </span>
