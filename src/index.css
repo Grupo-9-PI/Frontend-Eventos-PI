@@ -4,55 +4,43 @@
 
 
 :root[data-theme='light'] {
-    --tinta: #f4f5f7;
-    --panel: #ffffff;
-    --panel-elevado: #fdfdfd;
-    --input-bg: #ffffff;
-    --linea: rgba(0,0,0,.12);
-    --linea-fuerte: rgba(0,0,0,.2);
-    --papel: #1f2937;
-    --apagado: #6b7280;
-    --azul: #2563eb;
-    --azul-claro: #3b82f6;
-    --ambar: #d97706;
-    --oxido: #dc2626;
-    --salvia: #059669;
-    --background: 0 0% 96%;
-    --foreground: 0 0% 10%;
-    --border: 0 0% 85%;
-    --card: 0 0% 100%;
+  --tinta: #f4f5f7;
+  --panel: #ffffff;
+  --input-bg: #ffffff;
+  --panel-elevado: #f8f9fa;
+  --primario: #155eef;
+  --primario-hover: #175cd3;
+  --papel: #1a1a1a;
+  --apagado: #6b7280;
+  --linea: #e5e7eb;
+  --linea-fuerte: #d1d5db;
+  --oxido: #dc2626;
+  --oxido-fondo: #fef2f2;
+  --ambar: #d97706;
+  --ambar-fondo: #fffbeb;
+  --nav-hover: #e5e7eb;
+  --nav-active-bg: #e0f2fe;
+  --nav-active-text: #0369a1;
 }
 
 :root {
   --tinta: #1a1a1a;
   --panel: #232323;
-    --input-bg: #1d1d1d;
+  --input-bg: #1d1d1d;
   --panel-elevado: #2b2b2b;
-  --linea: rgba(255,255,255,.09);
-  --linea-fuerte: rgba(255,255,255,.17);
-  --papel: #ededed;
-  --apagado: #9a9a9a;
-  --azul: #1f4e79;
-  --azul-claro: #2c6693;
-  --ambar: #e8a33d;
-  --oxido: #d1512f;
-  --salvia: #6fae86;
-  --fuente-titulo: "Space Grotesk", sans-serif;
-  --fuente-texto: "Inter", sans-serif;
-  --radio-pq: 4px;
-  --radio-md: 6px;
-  --background: 0 0% 10%;
-  --foreground: 0 0% 93%;
-  --border: 0 0% 24%;
-  --card: 0 0% 14%;
-  --card-foreground: 0 0% 93%;
-  --primary: 208 59% 30%;
-  --primary-foreground: 0 0% 98%;
-  --muted: 0 0% 16%;
-  --muted-foreground: 0 0% 60%;
-  --input: 0 0% 12%;
-  --ring: 207 55% 48%;
-  color-scheme: dark;
+  --primario: #155eef;
+  --primario-hover: #175cd3;
+  --papel: #ececec;
+  --apagado: #888;
+  --linea: #333;
+  --linea-fuerte: #444;
+  --oxido: #e5484d;
+  --oxido-fondo: #3a1515;
+  --ambar: #f7b955;
+  --ambar-fondo: #332510;
+  --nav-hover: #242424;
+  --nav-active-bg: rgba(44,102,147,.24);
+  --nav-active-text: #d9e9f3;
 }
 
 * { box-sizing: border-box; }
@@ -85,11 +73,11 @@ p { margin: 0; }
 .brand-mark { width: 32px; height: 32px; display: grid; place-items: center; background: var(--azul); color: var(--papel); border-radius: 5px; font-family: var(--fuente-titulo); font-weight: 700; font-size: 11px; }
 .brand-name { font-family: var(--fuente-titulo); font-weight: 700; font-size: 16px; letter-spacing: -.03em; }
 .brand-sub { display: block; color: var(--apagado); font-size: 10px; text-transform: uppercase; letter-spacing: .15em; margin-top: 1px; }
-.nav-label { color: #707070; font-size: 10px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; padding: 0 11px 8px; }
+.nav-label { color: var(--apagado); font-size: 10px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; padding: 0 11px 8px; }
 .nav-group { display: grid; gap: 3px; }
-.nav-link { display: flex; align-items: center; gap: 10px; color: #a7a7a7; padding: 10px 11px; border-radius: var(--radio-pq); font-size: 13px; transition: background .15s, color .15s; }
-.nav-link:hover { background: #242424; color: var(--papel); }
-.nav-link.active { background: rgba(44,102,147,.24); color: #d9e9f3; box-shadow: inset 2px 0 0 var(--azul-claro); }
+.nav-link { display: flex; align-items: center; gap: 10px; color: var(--apagado); padding: 10px 11px; border-radius: var(--radio-pq); font-size: 13px; transition: background .15s, color .15s; }
+.nav-link:hover { background: var(--nav-hover); color: var(--papel); }
+.nav-link.active { background: var(--nav-active-bg); color: var(--nav-active-text); box-shadow: inset 2px 0 0 var(--azul-claro); }
 .nav-link .count { margin-left: auto; color: var(--ambar); font-size: 11px; }
 .sidebar-footer { margin-top: auto; border-top: 1px solid var(--linea); padding: 18px 10px 0; color: var(--apagado); font-size: 11px; line-height: 1.5; }
 .main-wrap { flex: 1; min-width: 0; }
@@ -207,7 +195,7 @@ select option { background: var(--panel); }
 .detail-layout { display: grid; grid-template-columns: 1fr; gap: 25px; align-items: start; }
 .side-card { padding: 17px; }
 .side-card + .side-card { margin-top: 12px; }
-.side-title { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: #a7a7a7; }
+.side-title { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--apagado); }
 .side-value { font-family: var(--fuente-titulo); font-size: 24px; margin-top: 10px; }
 .side-list { display: grid; gap: 8px; margin-top: 13px; }
 .side-row { display: flex; justify-content: space-between; gap: 8px; color: var(--apagado); font-size: 11px; }

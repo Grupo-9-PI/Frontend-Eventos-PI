@@ -1394,7 +1394,7 @@ function validarDatosEvento(datos: FormEvento, tareas: BorradorTarea[], mostrarP
   if (timeToHours(datos.duracion) <= 0) e.duracion = "Requerida.";
 
   if (!datos.horaEvento) e.horaEvento = "Obligatoria.";
-  if (mostrarPlan && !tareas.length) e.general = "Agrega al menos una gestión. Haz clic en '+ Agregar' o cancela la creación del plan.";
+  if (mostrarPlan && !tareas.length) e.general = "Agrega al menos una gestión. Haz clic en '+ Agregar plan inicial' o cancela la creación del plan.";
   return e;
 }
 
