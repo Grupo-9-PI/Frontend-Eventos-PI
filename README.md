@@ -11,14 +11,14 @@ Mesa de control para planificar, ejecutar y reprogramar la logística de eventos
 
 ## Rutas
 
-| Ruta | Descripción |
-| --- | --- |
-| `/` | Redirige a `/hoy`. |
-| `/hoy` | Tareas de los eventos agrupadas en retrasadas, para hoy y próximas. Desde aquí se pueden completar o mover. |
-| `/eventos` | Eventos activos o todos, con acceso a su detalle. |
-| `/crear` | Creación de evento con un plan inicial editable. |
-| `/evento/:id` | Detalle, tareas y edición o reprogramación del evento. |
-| `/progreso` | Resumen de gestiones terminadas y pendientes. |
+| Ruta          | Descripción                                                                                                 |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| `/`           | Redirige a `/hoy`.                                                                                          |
+| `/hoy`        | Tareas de los eventos agrupadas en retrasadas, para hoy y próximas. Desde aquí se pueden completar o mover. |
+| `/eventos`    | Eventos activos o todos, con acceso a su detalle.                                                           |
+| `/crear`      | Creación de evento con un plan inicial editable.                                                            |
+| `/evento/:id` | Detalle, tareas y edición o reprogramación del evento.                                                      |
+| `/progreso`   | Resumen de gestiones terminadas y pendientes.                                                               |
 
 ## Reglas de negocio
 
@@ -75,9 +75,9 @@ Esta app es un paquete dentro del workspace pnpm. Para que una clonación conser
 
 ## Bitácora de Sprint 0–1
 
-| Hallazgo | Cambio | Verificación |
-| --- | --- | --- |
+| Hallazgo                                                                    | Cambio                                                                                   | Verificación                                                                   |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | El prototipo aceptaba duraciones como reloj y mezclaba esfuerzo con horario | Estimaciones numéricas en horas, con campos separados para hora límite e inicio opcional | Formularios con `1.5 h`; el build no usa campos de reloj para estimar duración |
-| La capacidad estaba fija y permitía guardar planes sobrecargados | Límite diario configurable, validación de acumulación y sugerencia de próximo día viable | Crear o mover una tarea sobre el límite muestra cifras y no persiste el cambio |
-| Reprogramar el evento podía dejar plazos desalineados | Modal con desplazamiento explícito del plan y resumen de los días afectados | El plan vuelve a validarse antes de guardar |
-| La vista Hoy era principalmente de lectura | Acciones para completar y mover, grupos por plazo y estados vacíos con CTA | Los cambios actualizan el progreso y persisten en `localStorage` |
+| La capacidad estaba fija y permitía guardar planes sobrecargados            | Límite diario configurable, validación de acumulación y sugerencia de próximo día viable | Crear o mover una tarea sobre el límite muestra cifras y no persiste el cambio |
+| Reprogramar el evento podía dejar plazos desalineados                       | Modal con desplazamiento explícito del plan y resumen de los días afectados              | El plan vuelve a validarse antes de guardar                                    |
+| La vista Hoy era principalmente de lectura                                  | Acciones para completar y mover, grupos por plazo y estados vacíos con CTA               | Los cambios actualizan el progreso y persisten en `localStorage`               |

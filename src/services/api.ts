@@ -1,10 +1,10 @@
-import axios from 'axios';
+import axios from "axios";
 
 /**
  * URL base de la API apuntando al backend de Django.
  * Toma el valor de la variable de entorno, o por defecto a localhost si no está definida.
  */
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
 /**
  * Instancia preconfigurada de Axios.
@@ -13,7 +13,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 export const api = axios.create({
   baseURL: API_URL,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
@@ -28,7 +28,7 @@ api.interceptors.response.use(
   },
   (error) => {
     // Aquí se puede manejar errores globales, como redireccionar al login si hay un 401
-    console.error('API Error:', error.response?.data || error.message);
+    console.error("API Error:", error.response?.data || error.message);
     return Promise.reject(error);
-  }
+  },
 );
