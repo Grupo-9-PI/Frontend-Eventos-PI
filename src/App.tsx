@@ -1000,7 +1000,26 @@ function CrearEvento() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError({});
-    const validacion = validarDatosEvento(datos, tareas);
+    
+      if (mostrarPlan && !tareas.length && nuevo.titulo.trim()) {
+        const errs: Record<string, string> = {};
+        if (!nuevo.titulo.trim()) errs.titulo = 'Obligatorio.';
+        if (!nuevo.estimacion.trim() || nuevo.estimacion === '00:00') errs.estimacion = 'Obligatorio.';
+        if (Object.keys(errs).length > 0) {
+          setErrorNuevo(errs);
+        } else {
+          setTareas((ts) => [...ts, { ...nuevo, id: generarId("draft") }]);
+          setNuevo(borradorInicial());
+          setErrorNuevo({});
+        }
+      }
+      
+      const validacion = validarDatosEvento(datos, tareas, mostrarPlan);
+      
+      if (mostrarPlan && !tareas.length && Object.keys(errorNuevo).length === 0) {
+        setErrorNuevo({ titulo: 'Obligatorio', estimacion: 'Obligatorio' });
+      }
+
     if (Object.keys(validacion).length > 0) {
       setError(validacion);
       return;
@@ -1223,7 +1242,7 @@ function CrearEvento() {
                   className="button button-primary button-small"
                   onClick={añadirTarea}
                 >
-                  <Plus size={14} /> Agregar
+                  <Plus size={14} /> Agregar plan inicial
                 </button>
               </div>
             </div>
@@ -1340,7 +1359,7 @@ function CrearEvento() {
   );
 }
 
-function validarDatosEvento(datos: FormEvento, tareas: BorradorTarea[]) {
+function validarDatosEvento(datos: FormEvento, tareas: BorradorTarea[], mostrarPlan: boolean) {
   const e: Record<string, string> = {};
   if (!datos.nombre.trim()) e.nombre = "El nombre es obligatorio.";
   if (!datos.lugar.trim()) e.lugar = "El lugar es obligatorio.";
@@ -1352,7 +1371,7 @@ function validarDatosEvento(datos: FormEvento, tareas: BorradorTarea[]) {
   if (timeToHours(datos.duracion) <= 0) e.duracion = "Requerida.";
 
   if (!datos.horaEvento) e.horaEvento = "Obligatoria.";
-  if (!tareas.length) e.general = "Agrega al menos una gestión.";
+  if (mostrarPlan && !tareas.length) e.general = "Agrega al menos una gestión. Haz clic en '+ Agregar' o cancela la creación del plan.";
   return e;
 }
 
