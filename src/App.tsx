@@ -1595,18 +1595,105 @@ function CrearEvento() {
                   <option value="reunion">Plan Reunión</option>
                 </select>
               </div>
-              {tareas.map((t) => (
-                <div className="task-draft" key={t.id}>
-                  <div className="task-draft-info">{t.titulo}</div>
+              {tareas.map((t, index) => (
+                <div
+                  className="card card-pad"
+                  style={{
+                    border: "1px solid var(--linea-fuerte)",
+                    background: "var(--panel)",
+                    marginBottom: 10,
+                    position: "relative",
+                  }}
+                  key={t.id}
+                >
                   <button
                     type="button"
                     className="button button-small button-danger button-icon"
+                    style={{ position: "absolute", top: 10, right: 10 }}
                     onClick={() =>
                       setTareas((ts) => ts.filter((x) => x.id !== t.id))
                     }
                   >
                     <Trash2 size={13} />
                   </button>
+                  <div
+                    className="form-grid"
+                    style={{ gridTemplateColumns: "1fr 1fr", marginTop: 15 }}
+                  >
+                    <div className="field">
+                      <label>
+                        Gestión {index + 1} <span className="req">*</span>
+                      </label>
+                      <input
+                        value={t.titulo}
+                        onChange={(e) =>
+                          setTareas((ts) =>
+                            ts.map((x) =>
+                              x.id === t.id
+                                ? { ...x, titulo: e.target.value }
+                                : x,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="field">
+                      <label>
+                        Estimación (horas) <span className="req">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        pattern="[0-9]{2}:[0-9]{2}"
+                        placeholder="00:00"
+                        maxLength={5}
+                        value={t.estimacion}
+                        onChange={(e) =>
+                          setTareas((ts) =>
+                            ts.map((x) =>
+                              x.id === t.id
+                                ? { ...x, estimacion: e.target.value }
+                                : x,
+                            ),
+                          )
+                        }
+                        aria-label="Estimación de la gestión en horas y minutos"
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Plazo</label>
+                      <input
+                        type="date"
+                        value={t.fechaLimite}
+                        min={datos.fechaInicio}
+                        max={datos.fechaFin}
+                        onChange={(e) =>
+                          setTareas((ts) =>
+                            ts.map((x) =>
+                              x.id === t.id
+                                ? { ...x, fechaLimite: e.target.value }
+                                : x,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Hora</label>
+                      <input
+                        type="time"
+                        value={t.horaLimite}
+                        onChange={(e) =>
+                          setTareas((ts) =>
+                            ts.map((x) =>
+                              x.id === t.id
+                                ? { ...x, horaLimite: e.target.value }
+                                : x,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
               ))}
               <div
@@ -1660,7 +1747,8 @@ function CrearEvento() {
                     <input
                       type="date"
                       value={nuevo.fechaLimite}
-                      max={datos.fechaInicio}
+                      min={datos.fechaInicio}
+                      max={datos.fechaFin}
                       onChange={(e) =>
                         setNuevo({ ...nuevo, fechaLimite: e.target.value })
                       }
@@ -1735,11 +1823,10 @@ function validarTarea(evento: Evento, candidata: Subtarea) {
   if (candidata.estimacion <= 0) e.estimacion = "Mayor que 0.";
   if (
     candidata.fechaLimite &&
-    candidata.horaLimite &&
-    combinarFechaHora(candidata.fechaLimite, candidata.horaLimite) >
-      combinarFechaHora(evento.fechaInicio, evento.horaEvento)
+    (candidata.fechaLimite < evento.fechaInicio ||
+      candidata.fechaLimite > evento.fechaFin)
   )
-    e.fechaLimite = "El plazo debe ser anterior al evento.";
+    e.fechaLimite = "El plazo debe estar entre el inicio y el fin del evento.";
   return e;
 }
 
@@ -1996,7 +2083,8 @@ function TaskEditor({
           <input
             type="date"
             className={error.fechaLimite ? "error" : ""}
-            max={evento.fechaInicio}
+            min={evento.fechaInicio}
+            max={evento.fechaFin}
             value={tarea.fechaLimite}
             onChange={(e) =>
               setTarea({ ...tarea, fechaLimite: e.target.value })
@@ -2216,7 +2304,8 @@ function ReprogramarDialog({
               <input
                 type="date"
                 value={fecha}
-                max={evento.fechaInicio}
+                min={evento.fechaInicio}
+                max={evento.fechaFin}
                 onChange={(e) => setFecha(e.target.value)}
               />
             </div>
