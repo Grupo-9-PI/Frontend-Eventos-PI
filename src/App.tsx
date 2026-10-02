@@ -837,11 +837,7 @@ function FilaTarea({
         </div>
         <div className="task-meta">
           <span>
-            {mostrarEvento && (
-              <strong>
-                {tarea.eventoNombre} ·{" "}
-              </strong>
-            )}
+            {mostrarEvento && <strong>{tarea.eventoNombre} · </strong>}
             {textoPlazo(tarea)}
           </span>
           <span>{hoursToTime(tarea.estimacion)} horas estimadas</span>
@@ -2419,6 +2415,8 @@ function LoginPage() {
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
   const [mantener, setMantener] = useState(false);
+  const [mostrarPassword, setMostrarPassword] = useState(false);
+  const [mostrarPassword, setMostrarPassword] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [errorLogin, setErrorLogin] = useState("");
 
@@ -2495,6 +2493,44 @@ function LoginPage() {
             style={{ display: "flex", flexDirection: "column", gap: 20 }}
           >
             <div className="field">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  color: "var(--papel)",
+                  marginTop: -10,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={mostrarPassword}
+                  onChange={(e) => setMostrarPassword(e.target.checked)}
+                  style={{ width: 16, height: 16, margin: 0 }}
+                />{" "}
+                Mostrar contraseña
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  color: "var(--papel)",
+                  marginTop: -10,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={mostrarPassword}
+                  onChange={(e) => setMostrarPassword(e.target.checked)}
+                  style={{ width: 16, height: 16, margin: 0 }}
+                />{" "}
+                Mostrar contraseña
+              </label>
               <label style={{ color: "var(--papel)" }}>
                 Correo electrónico
               </label>

@@ -17,7 +17,9 @@ export function guardarToken(token: string, mantener: boolean): void {
 }
 
 export function obtenerToken(): string | null {
-  return localStorage.getItem(CLAVE_LOCAL) ?? sessionStorage.getItem(CLAVE_SESION);
+  return (
+    localStorage.getItem(CLAVE_LOCAL) ?? sessionStorage.getItem(CLAVE_SESION)
+  );
 }
 
 export function borrarToken(): void {
@@ -25,37 +27,57 @@ export function borrarToken(): void {
   sessionStorage.removeItem(CLAVE_SESION);
 }
 
-/**
- * Instancia preconfigurada de Axios.
- * Úsala en todo el frontend para hacer peticiones HTTP al backend.
- */
-export const api = axios.create({
+/** Instancia de Axios preconfigurada para añadir el JWT en todas las peticiones */
+const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    "Content-Type": "application/json",
+});
+
+api.interceptors.request.use(
+  (config) => {
+    const token = obtenerToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
   },
-});
+  (error) => Promise.reject(error),
+);
 
-/** Adjunta el token en cada petición autenticada. */
-api.interceptors.request.use((config) => {
-  const token = obtenerToken();
-  if (token) config.headers.Authorization = `Token ${token}`;
-  return config;
-});
-
-/** Convierte los errores de DRF en un mensaje legible para mostrar al usuario. */
+/** Helper para extraer mensajes de error legibles desde la respuesta de Django REST Framework */
 export function mensajeDeError(data: unknown): string {
   if (!data) return "No se pudo conectar con el servidor.";
   if (typeof data === "string") return data;
   if (typeof data === "object") {
     const registro = data as Record<string, unknown>;
-    if (typeof registro.detail === "string") return registro.detail;
+
+    // Si viene un 'detail' genérico (Ej: Token vencido o credenciales)
+    if (typeof registro.detail === "string") {
+      if (registro.detail.toLowerCase().includes("credencial")) {
+        return "Usuario o contraseña incorrectos.";
+      }
+      return registro.detail;
+    }
+
+    // Si vienen errores de validación de formulario por campo
     const partes: string[] = [];
+    const mapaCampos: Record<string, string> = {
+      email: "Correo electrónico",
+      password: "Contraseña",
+      nombre: "Nombre",
+      non_field_errors: "Error",
+    };
+
     for (const [campo, valor] of Object.entries(registro)) {
       const texto = Array.isArray(valor) ? valor.join(" ") : String(valor);
-      partes.push(campo === "non_field_errors" ? texto : `${campo}: ${texto}`);
+      const nombreCampo = mapaCampos[campo] || campo;
+
+      if (campo === "non_field_errors") {
+        partes.push(texto);
+      } else {
+        partes.push(`• ${nombreCampo}: ${texto}`);
+      }
     }
-    if (partes.length) return partes.join(" ");
+    if (partes.length) return partes.join("\n");
   }
   return "Ocurrió un error inesperado.";
 }
@@ -79,3 +101,5 @@ api.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+export default api;
