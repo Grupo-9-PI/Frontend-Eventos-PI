@@ -116,7 +116,7 @@ function useDatos(activo: boolean) {
     setErrorCarga(errores.length ? errores.join(" ") : "");
     if (mostrarCarga) {
       // Tiempo mínimo visible para que el esqueleto no parpadee con respuestas rapidas.
-      const restante = 400 - (Date.now() - inicio);
+      const restante = 600 - (Date.now() - inicio);
       if (restante > 0) {
         await new Promise((resolver) => window.setTimeout(resolver, restante));
       }
