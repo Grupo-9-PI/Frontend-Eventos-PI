@@ -2850,139 +2850,186 @@ function RecuperarPasswordPage() {
   const [, setLocation] = useLocation();
   const [correo, setCorreo] = useState("");
   const [enviado, setEnviado] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (correo) {
-      setEnviado(true);
-      setTimeout(() => setLocation("/login"), 4000);
+    if (!correo.includes("@")) {
+      setError("Por favor, ingresa un correo electrónico válido.");
+      return;
     }
+    setError("");
+    setEnviado(true);
+    setTimeout(() => setLocation("/login"), 4000);
   };
 
   return (
     <div
       style={{
         display: "flex",
-        height: "100vh",
-        backgroundColor: "var(--papel)",
-        color: "var(--papel)",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "100vh",
+        background: "var(--tinta)",
       }}
     >
-      <div
-        style={{
-          margin: "auto",
-          padding: "2rem",
-          width: "100%",
-          maxWidth: 400,
-          background: "var(--panel)",
-          borderRadius: 12,
-          boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
-          textAlign: "center",
-        }}
-      >
-        <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
-          Recuperar Contraseña
-        </h1>
-        {enviado ? (
-          <div>
-            <p
-              style={{
-                color: "var(--exito)",
-                fontSize: "0.95rem",
-                marginBottom: "1.5rem",
-              }}
-            >
-              Se ha enviado un enlace de recuperación a tu correo. Revisa tu
-              bandeja de entrada o spam.
-            </p>
-            <button
-              onClick={() => setLocation("/login")}
-              style={{
-                width: "100%",
-                padding: "0.75rem",
-                backgroundColor: "var(--primario)",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontWeight: "bold",
-              }}
-            >
-              Volver al Inicio
-            </button>
+      <div style={{ width: "100%", maxWidth: 400, padding: "40px 20px" }}>
+        <div style={{ textAlign: "center", marginBottom: 30 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              background: "var(--azul)",
+              color: "var(--papel)",
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "0 auto 16px",
+              fontSize: 18,
+              fontWeight: 700,
+              fontFamily: "var(--fuente-titulo)",
+            }}
+          >
+            EO
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} style={{ textAlign: "left" }}>
-            <p
-              style={{
-                fontSize: "0.95rem",
-                color: "var(--apagado)",
-                marginBottom: "1.5rem",
-                textAlign: "center",
-              }}
-            >
-              Ingresa el correo electrónico asociado a tu cuenta para enviarte
-              un enlace de recuperación.
-            </p>
-            <div style={{ marginBottom: "1.5rem" }}>
-              <label
+          <h1
+            style={{
+              fontSize: 24,
+              fontWeight: 700,
+              color: "var(--papel)",
+              marginBottom: 8,
+              fontFamily: "var(--fuente-titulo)",
+            }}
+          >
+            Recuperar Contraseña
+          </h1>
+          <p style={{ color: "var(--apagado)", fontSize: 14 }}>
+            Ingresa tu correo para enviarte un enlace.
+          </p>
+        </div>
+
+        <div
+          style={{ background: "var(--panel)", padding: 32, borderRadius: 12 }}
+        >
+          {enviado ? (
+            <div style={{ textAlign: "center" }}>
+              <p
                 style={{
-                  display: "block",
-                  marginBottom: "0.5rem",
-                  fontSize: "0.85rem",
-                  fontWeight: "bold",
-                  color: "var(--papel)",
+                  color: "var(--salvia)",
+                  fontSize: 14,
+                  marginBottom: 20,
+                  background: "rgba(5, 150, 105, 0.1)",
+                  padding: 12,
+                  borderRadius: 8,
+                  border: "1px solid var(--salvia)",
                 }}
               >
-                Correo electrónico
-              </label>
-              <input
-                type="email"
-                required
-                value={correo}
-                onChange={(e) => setCorreo(e.target.value)}
-                placeholder="tu@correo.com"
-                style={{
-                  width: "100%",
-                  padding: "0.75rem",
-                  backgroundColor: "var(--papel)",
-                  border: "1px solid var(--borde)",
-                  borderRadius: 6,
-                  color: "var(--papel)",
-                }}
-              />
-            </div>
-            <button
-              type="submit"
-              style={{
-                width: "100%",
-                padding: "0.75rem",
-                backgroundColor: "var(--primario)",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontWeight: "bold",
-                marginBottom: "1rem",
-              }}
-            >
-              Enviar enlace de recuperación
-            </button>
-            <div style={{ textAlign: "center" }}>
-              <span
+                Se ha enviado un enlace de recuperación a tu correo. Revisa tu
+                bandeja de entrada o spam.
+              </p>
+              <button
                 onClick={() => setLocation("/login")}
                 style={{
-                  fontSize: 12,
-                  color: "var(--primario)",
+                  width: "100%",
+                  padding: "12px",
+                  background: "var(--azul-claro)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  fontWeight: 600,
                   cursor: "pointer",
-                  fontWeight: "bold",
                 }}
               >
-                ← Volver al inicio de sesión
-              </span>
+                Volver al inicio de sesión
+              </button>
             </div>
-          </form>
-        )}
+          ) : (
+            <form onSubmit={handleSubmit}>
+              <div
+                className="field"
+                style={{ marginBottom: 20, textAlign: "left" }}
+              >
+                <label
+                  style={{
+                    color: "var(--papel)",
+                    display: "block",
+                    marginBottom: 8,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  Correo electrónico
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={correo}
+                  onChange={(e) => {
+                    setCorreo(e.target.value);
+                    setError("");
+                  }}
+                  placeholder="tu@correo.com"
+                  style={{
+                    width: "100%",
+                    border: error
+                      ? "1px solid var(--oxido)"
+                      : "1px solid var(--linea-fuerte)",
+                    background: "var(--input-bg)",
+                    color: "var(--papel)",
+                    padding: "10px 12px",
+                    borderRadius: 6,
+                    outline: error ? "none" : "",
+                  }}
+                />
+                {error && (
+                  <span
+                    style={{
+                      color: "var(--oxido)",
+                      fontSize: 12,
+                      marginTop: 4,
+                      display: "block",
+                      textAlign: "left",
+                    }}
+                  >
+                    {error}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  background: "var(--azul-claro)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  marginBottom: 16,
+                }}
+              >
+                Enviar enlace de recuperación
+              </button>
+
+              <div style={{ textAlign: "center" }}>
+                <span
+                  onClick={() => setLocation("/login")}
+                  style={{
+                    cursor: "pointer",
+                    fontSize: 14,
+                    color: "var(--azul-claro)",
+                    fontWeight: 500,
+                  }}
+                >
+                  ← Volver al inicio de sesión
+                </span>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );
