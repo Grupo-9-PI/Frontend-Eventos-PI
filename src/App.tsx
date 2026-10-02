@@ -1215,6 +1215,7 @@ function CrearEvento() {
   const [nuevo, setNuevo] = useState<BorradorTarea>(borradorInicial);
   const [errorNuevo, setErrorNuevo] = useState<Record<string, string>>({});
   const [error, setError] = useState<Record<string, string>>({});
+  const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false);
   useEffect(() => {
     setTareas((actuales) =>
       actuales.map((t) => ({
@@ -1314,7 +1315,7 @@ function CrearEvento() {
     setTareas(tareasNuevas);
   };
 
-  const submit = async (e: FormEvent) => {
+  const intentarSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError({});
 
@@ -1342,6 +1343,11 @@ function CrearEvento() {
       setError(validacion);
       return;
     }
+    setMostrarConfirmacion(true);
+  };
+
+  const confirmarSubmit = async () => {
+    setMostrarConfirmacion(false);
     const eventoPayload = {
       nombre: datos.nombre.trim(),
       tipo: datos.tipo,
@@ -1363,19 +1369,14 @@ function CrearEvento() {
       horaInicio: t.horaInicio || undefined,
       estimacion: timeToHours(t.estimacion),
     }));
-    if (
-      !window.confirm(
-        "¿Confirmas la creación de este evento y su plan de gestiones?",
-      )
-    )
-      return;
     const id = await crearEventoCompleto(eventoPayload, tareasPayload);
     if (id) setLocation("/evento/" + id);
   };
+
   return (
     <div>
       <Encabezado eyebrow="Nuevo plan" titulo="Crear evento" />
-      <form onSubmit={submit} className="card form-card" noValidate>
+      <form onSubmit={intentarSubmit} className="card form-card" noValidate>
         <section className="form-section">
           <h2 className="form-section-title">Identidad del evento</h2>
           <div className="form-grid">
@@ -1497,7 +1498,10 @@ function CrearEvento() {
                 <div className="field-error">{error.duracion}</div>
               )}
               <input
-                type="time"
+                type="text"
+                pattern="[0-9]{2}:[0-9]{2}"
+                placeholder="00:00"
+                maxLength={5}
                 className={error.duracion ? "error" : ""}
                 value={datos.duracion}
                 onChange={(e) => setCampo("duracion", e.target.value)}
@@ -1639,7 +1643,10 @@ function CrearEvento() {
                       <div className="field-error">{errorNuevo.estimacion}</div>
                     )}
                     <input
-                      type="time"
+                      type="text"
+                      pattern="[0-9]{2}:[0-9]{2}"
+                      placeholder="00:00"
+                      maxLength={5}
                       className={errorNuevo.estimacion ? "error" : ""}
                       value={nuevo.estimacion}
                       onChange={(e) =>
@@ -1684,6 +1691,16 @@ function CrearEvento() {
           </button>
         </div>
       </form>
+      {mostrarConfirmacion && (
+        <ConfirmDialog
+          titulo="¿Crear evento y plan?"
+          mensaje="¿Confirmas la creación de este evento y su plan de gestiones?"
+          onClose={() => setMostrarConfirmacion(false)}
+          onConfirm={confirmarSubmit}
+          confirmText="Aceptar"
+          isDanger={false}
+        />
+      )}
     </div>
   );
 }
@@ -2008,7 +2025,10 @@ function TaskEditor({
             <div className="field-error">{error.estimacion}</div>
           )}
           <input
-            type="time"
+            type="text"
+            pattern="[0-9]{2}:[0-9]{2}"
+            placeholder="00:00"
+            maxLength={5}
             className={error.estimacion ? "error" : ""}
             value={tarea.estimacion}
             onChange={(e) => setTarea({ ...tarea, estimacion: e.target.value })}
@@ -2069,11 +2089,15 @@ function ConfirmDialog({
   mensaje,
   onClose,
   onConfirm,
+  confirmText = "Eliminar",
+  isDanger = true,
 }: {
   titulo: string;
   mensaje: string;
   onClose: () => void;
   onConfirm: () => void;
+  confirmText?: string;
+  isDanger?: boolean;
 }) {
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -2135,15 +2159,15 @@ function ConfirmDialog({
             style={{
               flex: 1,
               padding: "11px",
-              background: "#d33833",
-              border: "1px solid #d33833",
+              background: isDanger ? "#d33833" : "var(--azul-medio)",
+              border: `1px solid ${isDanger ? "#d33833" : "var(--azul-medio)"}`,
               color: "#fff",
               fontWeight: 500,
               borderRadius: 8,
             }}
             onClick={onConfirm}
           >
-            Eliminar
+            {confirmText}
           </button>
         </div>
       </div>
