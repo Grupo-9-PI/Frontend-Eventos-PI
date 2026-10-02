@@ -216,7 +216,15 @@ function App() {
     <StoreContext.Provider value={datos}>
       <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
         <RoutedErrorBoundary>
-          <Shell />
+          <Switch>
+            <Route path="/login" component={LoginPage} />
+            <Route path="/registro" component={RegisterPage} />
+            <Route path="/:rest*">
+              <ProtectedRoute>
+                <Shell />
+              </ProtectedRoute>
+            </Route>
+          </Switch>
         </RoutedErrorBoundary>
       </WouterRouter>
     </StoreContext.Provider>
@@ -375,6 +383,7 @@ function InfoReglaPrioridad() {
 }
 
 function Shell() {
+  const { logout } = useAuth();
   const [tema, setTema] = useState(() => {
     const saved = localStorage.getItem("tema");
     if (saved === "light" || saved === "dark") return saved;
@@ -505,7 +514,10 @@ function Shell() {
           <button
             className="button button-danger"
             style={{ width: "100%", justifyContent: "center" }}
-            onClick={() => (window as any).performLogout()}
+            onClick={() => {
+              logout();
+              setLocation("/login");
+            }}
           >
             Cerrar sesión
           </button>
@@ -570,7 +582,10 @@ function Shell() {
               </div>
             </button>
             <button
-              onClick={() => (window as any).performLogout()}
+              onClick={() => {
+                logout();
+                setLocation("/login");
+              }}
               style={{
                 background: "none",
                 border: "none",
@@ -623,21 +638,13 @@ function Shell() {
             <Loading />
           ) : (
             <Switch>
-              <Route path="/login" component={LoginPage} />
-              <Route path="/registro" component={RegisterPage} />
-              <Route path="/:rest*">
-                <ProtectedRoute>
-                  <Switch>
-                    <Route path="/" component={RedireccionInicio} />
-                    <Route path="/hoy" component={Hoy} />
-                    <Route path="/eventos" component={Eventos} />
-                    <Route path="/crear" component={CrearEvento} />
-                    <Route path="/evento/:id" component={DetalleEvento} />
-                    <Route path="/progreso" component={Progreso} />
-                    <Route component={NotFound} />
-                  </Switch>
-                </ProtectedRoute>
-              </Route>
+              <Route path="/" component={RedireccionInicio} />
+              <Route path="/hoy" component={Hoy} />
+              <Route path="/eventos" component={Eventos} />
+              <Route path="/crear" component={CrearEvento} />
+              <Route path="/evento/:id" component={DetalleEvento} />
+              <Route path="/progreso" component={Progreso} />
+              <Route component={NotFound} />
             </Switch>
           )}
         </main>
