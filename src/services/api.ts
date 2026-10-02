@@ -17,7 +17,9 @@ export function guardarToken(token: string, mantener: boolean): void {
 }
 
 export function obtenerToken(): string | null {
-  return localStorage.getItem(CLAVE_LOCAL) ?? sessionStorage.getItem(CLAVE_SESION);
+  return (
+    localStorage.getItem(CLAVE_LOCAL) ?? sessionStorage.getItem(CLAVE_SESION)
+  );
 }
 
 export function borrarToken(): void {
@@ -49,13 +51,36 @@ export function mensajeDeError(data: unknown): string {
   if (typeof data === "string") return data;
   if (typeof data === "object") {
     const registro = data as Record<string, unknown>;
-    if (typeof registro.detail === "string") return registro.detail;
+
+    if (typeof registro.detail === "string") {
+      if (
+        registro.detail.toLowerCase().includes("credencial") ||
+        registro.detail.toLowerCase().includes("no active account")
+      ) {
+        return "Usuario o contraseña incorrectos.";
+      }
+      return registro.detail;
+    }
+
     const partes: string[] = [];
+    const mapaCampos: Record<string, string> = {
+      email: "Correo electrónico",
+      password: "Contraseña",
+      nombre: "Nombre",
+      non_field_errors: "Error",
+    };
+
     for (const [campo, valor] of Object.entries(registro)) {
       const texto = Array.isArray(valor) ? valor.join(" ") : String(valor);
-      partes.push(campo === "non_field_errors" ? texto : `${campo}: ${texto}`);
+      const nombreCampo = mapaCampos[campo] || campo;
+
+      if (campo === "non_field_errors") {
+        partes.push(texto);
+      } else {
+        partes.push(`• ${nombreCampo}: ${texto}`);
+      }
     }
-    if (partes.length) return partes.join(" ");
+    if (partes.length) return partes.join("\\n");
   }
   return "Ocurrió un error inesperado.";
 }

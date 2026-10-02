@@ -1089,6 +1089,8 @@ input:invalid:not(:placeholder-shown) {
 }
 
 .form-error {
+  white-space: pre-wrap;
+  line-height: 1.4;
   background: rgba(209, 81, 47, 0.12);
   border: 1px solid rgba(209, 81, 47, 0.55);
   color: var(--oxido);
