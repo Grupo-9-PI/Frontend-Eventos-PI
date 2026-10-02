@@ -2416,8 +2416,6 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [mantener, setMantener] = useState(false);
   const [mostrarPassword, setMostrarPassword] = useState(false);
-  const [mostrarPassword, setMostrarPassword] = useState(false);
-  const [mostrarPassword, setMostrarPassword] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [errorLogin, setErrorLogin] = useState("");
 

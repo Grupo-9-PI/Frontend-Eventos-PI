@@ -27,38 +27,41 @@ export function borrarToken(): void {
   sessionStorage.removeItem(CLAVE_SESION);
 }
 
-/** Instancia de Axios preconfigurada para añadir el JWT en todas las peticiones */
-const api = axios.create({
+/**
+ * Instancia preconfigurada de Axios.
+ * Úsala en todo el frontend para hacer peticiones HTTP al backend.
+ */
+export const api = axios.create({
   baseURL: API_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
 
-api.interceptors.request.use(
-  (config) => {
-    const token = obtenerToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error),
-);
+/** Adjunta el token en cada petición autenticada. */
+api.interceptors.request.use((config) => {
+  const token = obtenerToken();
+  if (token) config.headers.Authorization = `Token ${token}`;
+  return config;
+});
 
-/** Helper para extraer mensajes de error legibles desde la respuesta de Django REST Framework */
+/** Convierte los errores de DRF en un mensaje legible para mostrar al usuario. */
 export function mensajeDeError(data: unknown): string {
   if (!data) return "No se pudo conectar con el servidor.";
   if (typeof data === "string") return data;
   if (typeof data === "object") {
     const registro = data as Record<string, unknown>;
 
-    // Si viene un 'detail' genérico (Ej: Token vencido o credenciales)
     if (typeof registro.detail === "string") {
-      if (registro.detail.toLowerCase().includes("credencial")) {
+      if (
+        registro.detail.toLowerCase().includes("credencial") ||
+        registro.detail.toLowerCase().includes("no active account")
+      ) {
         return "Usuario o contraseña incorrectos.";
       }
       return registro.detail;
     }
 
-    // Si vienen errores de validación de formulario por campo
     const partes: string[] = [];
     const mapaCampos: Record<string, string> = {
       email: "Correo electrónico",
@@ -77,7 +80,7 @@ export function mensajeDeError(data: unknown): string {
         partes.push(`• ${nombreCampo}: ${texto}`);
       }
     }
-    if (partes.length) return partes.join("\n");
+    if (partes.length) return partes.join("\\n");
   }
   return "Ocurrió un error inesperado.";
 }
@@ -101,5 +104,3 @@ api.interceptors.response.use(
     return Promise.reject(error);
   },
 );
-
-export default api;
