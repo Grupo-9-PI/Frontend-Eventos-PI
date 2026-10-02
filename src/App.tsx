@@ -2471,7 +2471,15 @@ function LoginPage() {
                 <label style={{ color: "var(--papel)" }}>Contraseña</label>
                 <a
                   href="#"
-                  style={{ fontSize: 12, color: "var(--azul-claro)" }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setLocation("/recuperar");
+                  }}
+                  style={{
+                    cursor: "pointer",
+                    fontSize: 12,
+                    color: "var(--azul-claro)",
+                  }}
                 >
                   ¿Olvidaste tu contraseña?
                 </a>
