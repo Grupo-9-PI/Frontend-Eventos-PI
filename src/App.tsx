@@ -2,7 +2,6 @@ import {
   createContext,
   useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -15,6 +14,7 @@ import {
   ChevronRight,
   Clock3,
   Compass,
+  AlertCircle,
   HelpCircle,
   LayoutDashboard,
   ListChecks,
@@ -37,31 +37,34 @@ import {
 } from "wouter";
 import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
+import { useAuth } from "./Root";
 import {
-  CATEGORIAS,
   combinarFechaHora,
   hoursToTime,
   timeToHours,
   diferenciaDias,
-  diferenciaDias as diasEntre,
   fechaHoraBonita,
   generarId,
   hoyISO,
   repositorioEventos,
+  repositorioHoy,
   sumarDias,
-  tareasGlobales,
   type Evento,
   type EstadoSubtarea,
+  type GruposHoy,
   type Prioridad,
+  type RespuestaHoy,
   type Subtarea,
+  type TareaHoy,
 } from "@/lib/repositorioEventos";
 import "./index.css";
 
 type Aviso = { tipo: "success" | "error"; texto: string };
 type Store = {
   eventos: Evento[];
+  hoy: RespuestaHoy | null;
   cargando: boolean;
-  error: string;
+  errorCarga: string;
   aviso: Aviso | null;
   refrescar: () => void;
   quitarAviso: () => void;
@@ -91,24 +94,46 @@ function useStore(): Store {
   return store;
 }
 
-function useDatos() {
+function useDatos(activo: boolean) {
   const [eventos, setEventos] = useState<Evento[]>([]);
+  const [hoy, setHoy] = useState<RespuestaHoy | null>(null);
   const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState("");
+  const [errorCarga, setErrorCarga] = useState("");
   const [aviso, setAviso] = useState<Aviso | null>(null);
 
-  const cargar = async () => {
-    setCargando(true);
-    const resultado = await repositorioEventos.cargar();
-    if (resultado.ok) {
-      setEventos(resultado.data);
-      setError("");
-    } else setError(resultado.error);
-    setCargando(false);
+  const cargarTodo = async (mostrarCarga = true) => {
+    if (mostrarCarga) setCargando(true);
+    const inicio = Date.now();
+    const [resEventos, resHoy] = await Promise.all([
+      repositorioEventos.cargar(),
+      repositorioHoy.cargar(),
+    ]);
+    const errores: string[] = [];
+    if (resEventos.ok) setEventos(resEventos.data);
+    else errores.push(resEventos.error);
+    if (resHoy.ok) setHoy(resHoy.data);
+    else errores.push(resHoy.error);
+    setErrorCarga(errores.length ? errores.join(" ") : "");
+    if (mostrarCarga) {
+      // Tiempo mínimo visible para que el esqueleto no parpadee con respuestas rapidas.
+      const restante = 600 - (Date.now() - inicio);
+      if (restante > 0) {
+        await new Promise((resolver) => window.setTimeout(resolver, restante));
+      }
+      setCargando(false);
+    }
   };
+
   useEffect(() => {
-    cargar();
-  }, []);
+    if (!activo) {
+      setEventos([]);
+      setHoy(null);
+      setErrorCarga("");
+      setCargando(false);
+      return;
+    }
+    cargarTodo();
+  }, [activo]);
 
   useEffect(() => {
     if (!aviso) return;
@@ -116,14 +141,9 @@ function useDatos() {
     return () => window.clearTimeout(timer);
   }, [aviso]);
 
-  const notifyError = (err: string) => {
-    setError(err);
-    setAviso({ tipo: "error", texto: err });
-  };
-  const notifySuccess = (msg: string) => {
-    setError("");
+  const notifyError = (err: string) => setAviso({ tipo: "error", texto: err });
+  const notifySuccess = (msg: string) =>
     setAviso({ tipo: "success", texto: msg });
-  };
 
   const crearEventoCompleto = async (
     evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
@@ -134,10 +154,19 @@ function useDatos() {
       notifyError(res.error);
       return null;
     }
-    for (const t of tareas)
-      await repositorioEventos.crearSubtarea(res.data.id, t);
-    await cargar();
-    notifySuccess("Evento y plan inicial guardados.");
+    const fallidas: string[] = [];
+    for (const t of tareas) {
+      const creada = await repositorioEventos.crearSubtarea(res.data.id, t);
+      if (!creada.ok) fallidas.push(t.titulo);
+    }
+    await cargarTodo(false);
+    if (fallidas.length) {
+      notifyError(
+        `El evento se creó, pero no se pudieron guardar ${fallidas.length} gestión(es): ${fallidas.join(", ")}.`,
+      );
+    } else {
+      notifySuccess("Evento y plan inicial guardados.");
+    }
     return res.data.id;
   };
   const actualizarEvento = async (
@@ -149,7 +178,7 @@ function useDatos() {
       notifyError(res.error);
       return false;
     }
-    await cargar();
+    await cargarTodo(false);
     notifySuccess("Evento actualizado.");
     return true;
   };
@@ -159,7 +188,7 @@ function useDatos() {
       notifyError(res.error);
       return false;
     }
-    await cargar();
+    await cargarTodo(false);
     notifySuccess("Evento eliminado.");
     return true;
   };
@@ -169,7 +198,7 @@ function useDatos() {
       notifyError(res.error);
       return false;
     }
-    await cargar();
+    await cargarTodo(false);
     notifySuccess("Gestión agregada.");
     return true;
   };
@@ -179,7 +208,7 @@ function useDatos() {
       notifyError(res.error);
       return false;
     }
-    await cargar();
+    await cargarTodo(false);
     notifySuccess("Gestión actualizada.");
     return true;
   };
@@ -189,17 +218,18 @@ function useDatos() {
       notifyError(res.error);
       return false;
     }
-    await cargar();
+    await cargarTodo(false);
     notifySuccess("Gestión eliminada.");
     return true;
   };
 
   return {
     eventos,
+    hoy,
     cargando,
-    error,
+    errorCarga,
     aviso,
-    refrescar: cargar,
+    refrescar: cargarTodo,
     quitarAviso: () => setAviso(null),
     crearEventoCompleto,
     actualizarEvento,
@@ -211,7 +241,8 @@ function useDatos() {
 }
 
 function App() {
-  const datos = useDatos();
+  const { loggedIn } = useAuth();
+  const datos = useDatos(loggedIn);
   return (
     <StoreContext.Provider value={datos}>
       <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
@@ -357,9 +388,6 @@ function InfoReglaPrioridad() {
               letterSpacing: "-0.01em",
             }}
           >
-            <span style={{ color: "#9ca3af", fontWeight: 500, marginRight: 4 }}>
-              Título:
-            </span>
             Regla de prioridad
           </div>
           <div
@@ -370,12 +398,10 @@ function InfoReglaPrioridad() {
               lineHeight: 1.5,
             }}
           >
-            <span style={{ color: "#9ca3af", fontWeight: 500, marginRight: 4 }}>
-              Cuerpo:
-            </span>
-            Las subtareas se agrupan en Retrasadas, Para hoy y Próximas según su
-            fecha objetivo. Dentro de cada grupo se ordenan por fecha (más
-            antigua/cercana primero).
+            Primero las gestiones vencidas (cuya fecha y hora límite ya pasó),
+            después las que vencen hoy y al final las próximas. Dentro de cada
+            grupo va arriba la fecha más cercana y, si dos coinciden, la de
+            menor esfuerzo estimado.
           </div>
         </div>
       )}
@@ -384,7 +410,7 @@ function InfoReglaPrioridad() {
 }
 
 function Shell() {
-  const { logout } = useAuth();
+  const { logout, usuario } = useAuth();
   const [tema, setTema] = useState(() => {
     const saved = localStorage.getItem("tema");
     if (saved === "light" || saved === "dark") return saved;
@@ -393,12 +419,9 @@ function Shell() {
       ? "light"
       : "dark";
   });
-  const { eventos, cargando } = useStore();
+  const { eventos, hoy, cargando } = useStore();
   const [location, setLocation] = useLocation();
-  const globales = tareasGlobales(eventos);
-  const retrasadas = globales.filter(
-    (t) => t.estado !== "hecho" && diasEntre(hoyISO(), t.fechaLimite) < 0,
-  ).length;
+  const retrasadas = hoy?.grupos.vencidas.length ?? 0;
   const activos = eventos.filter(
     (e) =>
       diferenciaDias(hoyISO(), e.fechaInicio) >= 0 ||
@@ -463,6 +486,16 @@ function Shell() {
             borderTop: "1px solid var(--linea)",
           }}
         >
+          <div style={{ textAlign: "center", marginBottom: 12 }}>
+            <div
+              style={{ fontSize: 13, fontWeight: 600, color: "var(--papel)" }}
+            >
+              {usuario?.nombre}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--apagado)" }}>
+              {usuario?.email}
+            </div>
+          </div>
           <div
             style={{
               display: "flex",
@@ -672,13 +705,14 @@ function Loading() {
   );
 }
 function Feedback() {
-  const { aviso, error, refrescar, quitarAviso } = useStore();
-  if (!aviso && !error) return null;
+  const { aviso, quitarAviso } = useStore();
+  if (!aviso) return null;
   return (
     <div
       className="toast"
+      role="status"
       style={
-        aviso?.tipo === "error" || error
+        aviso.tipo === "error"
           ? {
               background: "#45261f",
               borderColor: "rgba(209,81,47,.55)",
@@ -687,21 +721,7 @@ function Feedback() {
           : undefined
       }
     >
-      {error ? (
-        <>
-          <strong>Fallo de red</strong>
-          <br />
-          {error}{" "}
-          <button
-            className="button button-small button-ghost"
-            onClick={refrescar}
-          >
-            <RotateCcw size={12} /> Reintentar
-          </button>
-        </>
-      ) : (
-        aviso?.texto
-      )}
+      {aviso.texto}
       <button
         onClick={quitarAviso}
         style={{
@@ -767,22 +787,24 @@ function calcularPorcentaje(evento: Evento) {
       )
     : 0;
 }
-function estadoFecha(fecha: string) {
-  const dias = diferenciaDias(hoyISO(), fecha);
-  return dias < 0 ? "overdue" : dias === 0 ? "today" : "";
+function estaVencida(tarea: { fechaLimite: string; horaLimite: string }) {
+  return combinarFechaHora(tarea.fechaLimite, tarea.horaLimite) < Date.now();
+}
+function estadoFecha(tarea: { fechaLimite: string; horaLimite: string }) {
+  if (estaVencida(tarea)) return "overdue";
+  return diferenciaDias(hoyISO(), tarea.fechaLimite) === 0 ? "today" : "";
 }
 function textoPlazo(tarea: Subtarea) {
-  const dias = diferenciaDias(hoyISO(), tarea.fechaLimite);
-  return dias < 0
-    ? "Retrasada · " + fechaHoraBonita(tarea.fechaLimite, tarea.horaLimite)
-    : dias === 0
-      ? "Hoy · " + tarea.horaLimite
-      : fechaHoraBonita(tarea.fechaLimite, tarea.horaLimite);
+  if (estaVencida(tarea)) {
+    const dias = diferenciaDias(hoyISO(), tarea.fechaLimite);
+    return dias === 0
+      ? "Vencida hoy · " + tarea.horaLimite
+      : "Retrasada · " + fechaHoraBonita(tarea.fechaLimite, tarea.horaLimite);
+  }
+  return diferenciaDias(hoyISO(), tarea.fechaLimite) === 0
+    ? "Hoy · " + tarea.horaLimite
+    : fechaHoraBonita(tarea.fechaLimite, tarea.horaLimite);
 }
-function esInmediata(tarea: Subtarea) {
-  return /streaming|inmediata/i.test(tarea.titulo);
-}
-
 function FilaTarea({
   tarea,
   mostrarEvento,
@@ -791,14 +813,14 @@ function FilaTarea({
   onEditar,
   onEliminar,
 }: {
-  tarea: Subtarea;
+  tarea: Subtarea & { eventoNombre?: string };
   mostrarEvento?: boolean;
   onToggle: () => void;
   onReprogramar: () => void;
   onEditar?: () => void;
   onEliminar?: () => void;
 }) {
-  const fecha = estadoFecha(tarea.fechaLimite);
+  const fecha = estadoFecha(tarea);
   return (
     <div className={"task-row " + fecha}>
       <input
@@ -817,17 +839,13 @@ function FilaTarea({
           <span>
             {mostrarEvento && (
               <strong>
-                {(tarea as Subtarea & { eventoNombre?: string }).eventoNombre}{" "}
-                ·{" "}
+                {tarea.eventoNombre} ·{" "}
               </strong>
             )}
             {textoPlazo(tarea)}
           </span>
           <span>{hoursToTime(tarea.estimacion)} horas estimadas</span>
           {tarea.horaInicio && <span>Inicio {tarea.horaInicio}</span>}
-          <span className="tag">
-            {CATEGORIAS.find((c) => c.id === tarea.categoria)?.nombre ?? "Otro"}
-          </span>
           {tarea.estado === "en_progreso" && (
             <span className="tag tag-urgent">En curso</span>
           )}
@@ -837,11 +855,6 @@ function FilaTarea({
         </div>
       </div>
       <div className="task-actions">
-        {esInmediata(tarea) && (
-          <span className="task-help tag tag-urgent" tabIndex={0}>
-            Gestión inmediata
-          </span>
-        )}
         {onEditar && (
           <button
             className="button button-small button-ghost button-icon"
@@ -870,37 +883,25 @@ function FilaTarea({
 }
 
 function Hoy() {
-  const { eventos, actualizarSubtarea } = useStore();
+  const { eventos, hoy, errorCarga, refrescar, actualizarSubtarea } =
+    useStore();
   const [reprogramar, setReprogramar] = useState<{
     evento: Evento;
     tarea: Subtarea;
   } | null>(null);
-  const todas = useMemo(
-    () =>
-      tareasGlobales(eventos)
-        .filter((t) => t.estado !== "hecho")
-        .sort(
-          (a, b) =>
-            combinarFechaHora(a.fechaLimite, a.horaLimite) -
-              combinarFechaHora(b.fechaLimite, b.horaLimite) ||
-            a.estimacion - b.estimacion,
-        ),
-    [eventos],
-  );
-  const vencidas = todas.filter(
-    (t) => diferenciaDias(hoyISO(), t.fechaLimite) < 0,
-  );
-  const hoy = todas.filter(
-    (t) => diferenciaDias(hoyISO(), t.fechaLimite) === 0,
-  );
-  const proximas = todas.filter(
-    (t) => diferenciaDias(hoyISO(), t.fechaLimite) > 0,
-  );
 
-  const cambiarEstado = (eventoId: string, tareaId: string) => {
-    const e = eventos.find((ev) => ev.id === eventoId);
-    const t = e?.subtareas.find((st) => st.id === tareaId);
-    if (t) actualizarSubtarea(eventoId, { ...t, estado: "hecho" });
+  const grupos: GruposHoy = hoy?.grupos ?? {
+    vencidas: [],
+    para_hoy: [],
+    proximas: [],
+  };
+  const total = hoy?.total ?? 0;
+
+  const cambiarEstado = (tarea: TareaHoy) => {
+    actualizarSubtarea(tarea.eventoId, {
+      ...tarea,
+      estado: tarea.estado === "hecho" ? "pendiente" : "hecho",
+    });
   };
 
   const moverTarea = async (
@@ -918,8 +919,9 @@ function Hoy() {
       fechaLimite: fecha,
       horaLimite: hora,
     });
-    if (problema) {
-      window.alert(problema);
+    const mensajes = Object.values(problema);
+    if (mensajes.length > 0) {
+      window.alert(mensajes.join(" "));
       return;
     }
     if (
@@ -931,14 +933,15 @@ function Hoy() {
     )
       setReprogramar(null);
   };
-  const bloque = (titulo: string, lista: typeof todas, clase = "") => (
+
+  const bloque = (titulo: string, lista: TareaHoy[], vacio: string) => (
     <section className="hoy-section">
       <div className="section-head">
         <div className="section-title-row">
           <h2 className="section-title">{titulo}</h2>
           <span className="section-count">{lista.length}</span>
         </div>
-        {titulo === "Retrasadas" && (
+        {titulo === "Vencidas" && lista.length > 0 && (
           <span className="tag tag-overdue">Requieren decisión</span>
         )}
       </div>
@@ -949,7 +952,7 @@ function Hoy() {
               key={t.id}
               tarea={t}
               mostrarEvento
-              onToggle={() => cambiarEstado(t.eventoId, t.id)}
+              onToggle={() => cambiarEstado(t)}
               onReprogramar={() => {
                 const e = eventos.find((ev) => ev.id === t.eventoId);
                 if (e) setReprogramar({ evento: e, tarea: t });
@@ -959,19 +962,42 @@ function Hoy() {
         </div>
       ) : (
         <div className="card card-pad muted" style={{ fontSize: 12 }}>
-          {clase || "Nada en este grupo."}
+          {vacio}
         </div>
       )}
     </section>
   );
+
+  if (errorCarga) {
+    return (
+      <div>
+        <Encabezado
+          eyebrow="Panel de control"
+          titulo="Hoy"
+          descripcion="No pudimos cargar la información."
+        />
+        <div className="empty" role="alert">
+          <AlertCircle className="empty-icon" size={25} />
+          <div className="empty-title">
+            Algo salió mal al cargar tus gestiones
+          </div>
+          <p className="empty-copy">{errorCarga}</p>
+          <button className="button button-primary" onClick={refrescar}>
+            <RotateCcw size={14} /> Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <Encabezado
         eyebrow="Panel de control"
         titulo="Hoy"
         descripcion={
-          todas.length
-            ? `${todas.length} gestiones abiertas.`
+          total
+            ? `${total} ${total === 1 ? "gestión abierta" : "gestiones abiertas"}.`
             : "El plan está despejado."
         }
         accion={
@@ -980,20 +1006,29 @@ function Hoy() {
           </Link>
         }
       />
+      <div className="rule-banner" aria-label="Regla de prioridad">
+        <strong>Regla de prioridad</strong>
+        <span>
+          Primero las gestiones vencidas (cuya fecha y hora límite ya pasó),
+          después las que vencen hoy y al final las próximas. Dentro de cada
+          grupo va arriba la fecha más cercana y, si dos coinciden, la de menor
+          esfuerzo estimado.
+        </span>
+      </div>
       {eventos.length === 0 ? (
         <EmptyState
           titulo="Todavía no hay eventos"
-          copy=""
+          copy="Crea tu primer evento para empezar a organizar sus gestiones."
           accion={
             <Link href="/crear" className="button button-primary">
               Crear evento
             </Link>
           }
         />
-      ) : todas.length === 0 ? (
+      ) : total === 0 ? (
         <EmptyState
           titulo="No hay gestiones pendientes"
-          copy="Todas las tareas están hechas."
+          copy="Todas las gestiones están hechas. Puedes revisar tus eventos o crear uno nuevo."
           accion={
             <Link href="/eventos" className="button button-secondary">
               Ver eventos
@@ -1002,9 +1037,9 @@ function Hoy() {
         />
       ) : (
         <>
-          {bloque("Retrasadas", vencidas, "No hay tareas retrasadas.")}
-          {bloque("Para hoy", hoy, "Nada vence hoy.")}
-          {bloque("Próximas", proximas, "No hay próximas gestiones.")}
+          {bloque("Vencidas", grupos.vencidas, "No hay gestiones vencidas.")}
+          {bloque("Para hoy", grupos.para_hoy, "Nada vence hoy.")}
+          {bloque("Próximas", grupos.proximas, "No hay próximas gestiones.")}
         </>
       )}
       {reprogramar && (
@@ -1106,7 +1141,6 @@ function TarjetaEvento({ evento }: { evento: Evento }) {
     <Link href={"/evento/" + evento.id} className="card event-card">
       <div className="event-card-top">
         <div>
-          <div className="event-type">{evento.tipo}</div>
           <h2 className="event-name">{evento.nombre}</h2>
         </div>
         <ChevronRight size={17} color="#777" />
@@ -1476,12 +1510,11 @@ function CrearEvento() {
                 <div className="field-error">{error.duracion}</div>
               )}
               <input
-                type="text"
-                pattern="^([0-9]{1,2}):([0-5][0-9])$"
-                placeholder="00:00"
+                type="time"
                 className={error.duracion ? "error" : ""}
                 value={datos.duracion}
                 onChange={(e) => setCampo("duracion", e.target.value)}
+                aria-label="Duración del evento en horas y minutos"
               />
             </div>
             <div className="field full">
@@ -1619,14 +1652,13 @@ function CrearEvento() {
                       <div className="field-error">{errorNuevo.estimacion}</div>
                     )}
                     <input
-                      type="text"
+                      type="time"
                       className={errorNuevo.estimacion ? "error" : ""}
-                      pattern="^([0-9]{1,2}):([0-5][0-9])$"
-                      placeholder="00:00"
                       value={nuevo.estimacion}
                       onChange={(e) =>
                         setNuevo({ ...nuevo, estimacion: e.target.value })
                       }
+                      aria-label="Estimación de la gestión en horas y minutos"
                     />
                   </div>
                   <div className="field">
@@ -1681,8 +1713,8 @@ function validarDatosEvento(
     if (!datos.fechaInicio) e.fechaInicio = "Elige una fecha.";
     if (!datos.fechaFin) e.fechaFin = "Elige una fecha.";
   } else if (datos.fechaFin < datos.fechaInicio) e.fechaFin = "Inválida.";
-  if (!datos.lugar.trim()) e.lugar = "Obligatorio.";
-  if (timeToHours(datos.duracion) <= 0) e.duracion = "Requerida.";
+  if (timeToHours(datos.duracion) <= 0)
+    e.duracion = "Indica una duración mayor a 0.";
 
   if (!datos.horaEvento) e.horaEvento = "Obligatoria.";
   if (mostrarPlan && !tareas.length)
@@ -1989,12 +2021,11 @@ function TaskEditor({
             <div className="field-error">{error.estimacion}</div>
           )}
           <input
-            type="text"
-            pattern="^([0-9]{1,2}):([0-5][0-9])$"
-            placeholder="00:00"
+            type="time"
             className={error.estimacion ? "error" : ""}
             value={tarea.estimacion}
             onChange={(e) => setTarea({ ...tarea, estimacion: e.target.value })}
+            aria-label="Estimación de la gestión en horas y minutos"
           />
         </div>
       </div>
@@ -2155,7 +2186,7 @@ function ReprogramarDialog({
       horaLimite: hora,
     });
     if (Object.keys(problema).length > 0) {
-      setError("Asegúrate de colocar fecha y hora.");
+      setError(Object.values(problema).join(" "));
       return;
     }
     onSave(fecha, hora);
@@ -2377,8 +2408,6 @@ function Progreso() {
 
 export default App;
 
-import { useAuth } from "./Root";
-
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { loggedIn } = useAuth();
   const [, setLocation] = useLocation();
@@ -2394,9 +2423,27 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 }
 
 function LoginPage() {
-  const { login } = useAuth();
+  const { login, loggedIn } = useAuth();
   const [, setLocation] = useLocation();
+  const [correo, setCorreo] = useState("");
+  const [password, setPassword] = useState("");
   const [mantener, setMantener] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [errorLogin, setErrorLogin] = useState("");
+
+  useEffect(() => {
+    if (loggedIn) setLocation("/hoy");
+  }, [loggedIn, setLocation]);
+
+  const enviar = async (e: FormEvent) => {
+    e.preventDefault();
+    setEnviando(true);
+    setErrorLogin("");
+    const resultado = await login(correo.trim(), password, mantener);
+    setEnviando(false);
+    if (resultado.ok) setLocation("/hoy");
+    else setErrorLogin(resultado.error);
+  };
 
   return (
     <div
@@ -2453,18 +2500,21 @@ function LoginPage() {
           }}
         >
           <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              login(mantener);
-              setLocation("/hoy");
-            }}
+            onSubmit={enviar}
             style={{ display: "flex", flexDirection: "column", gap: 20 }}
           >
             <div className="field">
               <label style={{ color: "var(--papel)" }}>
                 Correo electrónico
               </label>
-              <input type="email" required placeholder="tu@correo.com" />
+              <input
+                type="email"
+                required
+                value={correo}
+                onChange={(e) => setCorreo(e.target.value)}
+                placeholder="tu@correo.com"
+                autoComplete="email"
+              />
             </div>
             <div className="field">
               <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -2480,7 +2530,14 @@ function LoginPage() {
                   ¿Olvidaste tu contraseña?
                 </span>
               </div>
-              <input type="password" required placeholder="••••••••" />
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+              />
             </div>
             <label
               style={{
@@ -2500,6 +2557,11 @@ function LoginPage() {
               />{" "}
               Mantener sesión iniciada
             </label>
+            {errorLogin && (
+              <div className="form-error" role="alert">
+                {errorLogin}
+              </div>
+            )}
             <button
               type="submit"
               className="button button-primary"
@@ -2509,83 +2571,11 @@ function LoginPage() {
                 fontSize: 14,
                 marginTop: 10,
               }}
+              disabled={enviando}
             >
-              Ingresar
+              {enviando ? "Ingresando…" : "Ingresar"}
             </button>
           </form>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              margin: "24px 0",
-              gap: 10,
-            }}
-          >
-            <div
-              style={{ flex: 1, height: 1, background: "var(--linea)" }}
-            ></div>
-            <span style={{ fontSize: 12, color: "var(--apagado)" }}>
-              O continúa con
-            </span>
-            <div
-              style={{ flex: 1, height: 1, background: "var(--linea)" }}
-            ></div>
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              type="button"
-              className="button button-secondary"
-              style={{
-                flex: 1,
-                padding: 10,
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: 6,
-              }}
-              onClick={() => {
-                login(mantener);
-                setLocation("/hoy");
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24">
-                <path
-                  fill="currentColor"
-                  d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81Z"
-                />
-              </svg>{" "}
-              Google
-            </button>
-            <button
-              type="button"
-              className="button button-secondary"
-              style={{
-                flex: 1,
-                padding: 10,
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: 6,
-              }}
-              onClick={() => {
-                login(mantener);
-                setLocation("/hoy");
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24">
-                <path
-                  fill="#0078D4"
-                  d="M2.384 19.062L21.616 23.3V.7L2.384 4.938v14.124zm16.732-15.86v17.6l-14.232-3.48V6.678l14.232-3.48z"
-                />
-                <path
-                  fill="#0078D4"
-                  d="M7.884 9.072v5.856l6.232-1.54v-2.776l-6.232-1.54z"
-                />
-              </svg>{" "}
-              Outlook
-            </button>
-          </div>
 
           <div style={{ textAlign: "center", marginTop: 24 }}>
             <span style={{ fontSize: 13, color: "var(--apagado)" }}>
@@ -2614,21 +2604,32 @@ function LoginPage() {
 }
 
 function RegisterPage() {
+  const { registrar, loggedIn } = useAuth();
   const [, setLocation] = useLocation();
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [mostrarPassword, setMostrarPassword] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [errorRegistro, setErrorRegistro] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (loggedIn) setLocation("/hoy");
+  }, [loggedIn, setLocation]);
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (password !== confirmPassword) {
-      alert("Las contraseñas no coinciden");
+      setErrorRegistro("Las contraseñas no coinciden.");
       return;
     }
-    alert("Usuario registrado con éxito (Simulación)");
-    setLocation("/login");
+    setEnviando(true);
+    setErrorRegistro("");
+    const resultado = await registrar(nombre.trim(), email.trim(), password);
+    setEnviando(false);
+    if (resultado.ok) setLocation("/hoy");
+    else setErrorRegistro(resultado.error);
   };
 
   return (
@@ -2733,6 +2734,11 @@ function RegisterPage() {
               />{" "}
               Mostrar contraseñas
             </label>
+            {errorRegistro && (
+              <div className="form-error" role="alert">
+                {errorRegistro}
+              </div>
+            )}
             <button
               type="submit"
               className="button button-primary"
@@ -2742,83 +2748,11 @@ function RegisterPage() {
                 fontSize: 14,
                 marginTop: 10,
               }}
+              disabled={enviando}
             >
-              Registrarse
+              {enviando ? "Creando cuenta…" : "Registrarse"}
             </button>
           </form>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              margin: "20px 0",
-              gap: 10,
-            }}
-          >
-            <div
-              style={{ flex: 1, height: 1, background: "var(--linea)" }}
-            ></div>
-            <span style={{ fontSize: 12, color: "var(--apagado)" }}>
-              O regístrate con
-            </span>
-            <div
-              style={{ flex: 1, height: 1, background: "var(--linea)" }}
-            ></div>
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              type="button"
-              className="button button-secondary"
-              style={{
-                flex: 1,
-                padding: 10,
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: 6,
-              }}
-              onClick={() => {
-                alert("Simulación: Registro con Google");
-                setLocation("/login");
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24">
-                <path
-                  fill="currentColor"
-                  d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81Z"
-                />
-              </svg>{" "}
-              Google
-            </button>
-            <button
-              type="button"
-              className="button button-secondary"
-              style={{
-                flex: 1,
-                padding: 10,
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: 6,
-              }}
-              onClick={() => {
-                alert("Simulación: Registro con Outlook");
-                setLocation("/login");
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24">
-                <path
-                  fill="#0078D4"
-                  d="M2.384 19.062L21.616 23.3V.7L2.384 4.938v14.124zm16.732-15.86v17.6l-14.232-3.48V6.678l14.232-3.48z"
-                />
-                <path
-                  fill="#0078D4"
-                  d="M7.884 9.072v5.856l6.232-1.54v-2.776l-6.232-1.54z"
-                />
-              </svg>{" "}
-              Outlook
-            </button>
-          </div>
 
           <div style={{ textAlign: "center", marginTop: 20 }}>
             <span style={{ fontSize: 13, color: "var(--apagado)" }}>
@@ -2860,7 +2794,6 @@ function RecuperarPasswordPage() {
     }
     setError("");
     setEnviado(true);
-    setTimeout(() => setLocation("/login"), 4000);
   };
 
   return (
@@ -2905,7 +2838,7 @@ function RecuperarPasswordPage() {
             Recuperar Contraseña
           </h1>
           <p style={{ color: "var(--apagado)", fontSize: 14 }}>
-            Ingresa tu correo para enviarte un enlace.
+            Escribe el correo de tu cuenta para solicitar el restablecimiento.
           </p>
         </div>
 
@@ -2925,8 +2858,9 @@ function RecuperarPasswordPage() {
                   border: "1px solid var(--salvia)",
                 }}
               >
-                Se ha enviado un enlace de recuperación a tu correo. Revisa tu
-                bandeja de entrada o spam.
+                Por ahora la recuperación automática por correo no está
+                disponible. Pídele al administrador del sistema que restablezca
+                tu contraseña.
               </p>
               <button
                 onClick={() => setLocation("/login")}

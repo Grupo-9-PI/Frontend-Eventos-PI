@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -21,7 +21,7 @@
   --border: 0 0% 85%;
   --card: 0 0% 100%;
   color-scheme: light;
-  accent-color: var(--primario);
+  accent-color: var(--azul-claro);
 }
 
 :root {
@@ -54,7 +54,7 @@
   --input: 0 0% 12%;
   --ring: 207 55% 48%;
   color-scheme: dark;
-  accent-color: var(--primario);
+  accent-color: var(--azul-claro);
 }
 
 * {
@@ -534,16 +534,9 @@ p {
   align-items: flex-start;
   gap: 12px;
 }
-.event-type {
-  color: var(--azul-claro);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 10px;
-  font-weight: 600;
-}
 .event-name {
   font-size: 19px;
-  margin-top: 7px;
+  margin-top: 0;
 }
 .event-info {
   color: var(--apagado);
@@ -958,9 +951,9 @@ select option {
 }
 .skeleton {
   height: 58px;
-  background: linear-gradient(90deg, #232323, #303030, #232323);
+  background: linear-gradient(90deg, #232323, #2b2b2b, #232323);
   background-size: 200% 100%;
-  animation: shimmer 1.2s infinite;
+  animation: shimmer 3.2s ease-in-out infinite;
   border-radius: 4px;
 }
 @keyframes shimmer {
@@ -1093,4 +1086,35 @@ select option {
 input:invalid:not(:placeholder-shown) {
   border-color: var(--oxido) !important;
   outline-color: var(--oxido) !important;
+}
+
+.rule-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--linea);
+  border-left: 3px solid var(--azul-claro);
+  border-radius: var(--radio-md);
+  padding: 12px 15px;
+  margin-bottom: 18px;
+  font-size: 12px;
+  color: var(--apagado);
+}
+.rule-banner strong {
+  color: var(--papel);
+  font-family: var(--fuente-titulo);
+  font-size: 13px;
+}
+.form-error {
+  background: rgba(209, 81, 47, 0.12);
+  border: 1px solid rgba(209, 81, 47, 0.55);
+  color: var(--oxido);
+  border-radius: var(--radio-md);
+  padding: 10px 12px;
+  font-size: 12.5px;
+}
+.button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }

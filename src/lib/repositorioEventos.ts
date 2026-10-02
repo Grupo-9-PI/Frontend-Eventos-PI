@@ -32,15 +32,6 @@ export type Evento = {
 
 export type Resultado<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export const CATEGORIAS = [
-  { id: "salon", nombre: "Salón" },
-  { id: "invitaciones", nombre: "Invitaciones" },
-  { id: "catering", nombre: "Catering" },
-  { id: "proveedores", nombre: "Proveedores" },
-  { id: "otro", nombre: "Otro" },
-];
-export const PRIORIDADES: Prioridad[] = ["alta", "media", "baja"];
-
 function hoy(): string {
   const fecha = new Date();
   const local = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000);
@@ -266,3 +257,70 @@ export function timeToHours(t: string): number {
   const parts = t.split(":");
   return Number((parseInt(parts[0]) + parseInt(parts[1]) / 60).toFixed(2));
 }
+
+// ---------------------------------------------------------------------------
+// Vista Hoy: datos ya agrupados y ordenados por el backend
+// ---------------------------------------------------------------------------
+
+export type TareaHoy = Subtarea & { eventoId: string; eventoNombre: string };
+
+export type GruposHoy = {
+  vencidas: TareaHoy[];
+  para_hoy: TareaHoy[];
+  proximas: TareaHoy[];
+};
+
+export type RespuestaHoy = {
+  generadoEn: string;
+  total: number;
+  filtros: { evento: number | null; estado: string };
+  grupos: GruposHoy;
+};
+
+// El endpoint /hoy usa nombres propios (titulo, fecha_limite), distintos a /subtareas/.
+function mapTareaHoyFromApi(t: any): TareaHoy {
+  return {
+    id: t.id.toString(),
+    titulo: t.titulo,
+    categoria: (t.categoria ?? "OTRO").toLowerCase(),
+    prioridad: t.prioridad,
+    estado: t.estado,
+    fechaLimite: t.fecha_limite,
+    horaLimite: t.hora_limite.slice(0, 5),
+    horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
+    estimacion: Number(t.estimacion_horas),
+    eventoId: t.evento.id.toString(),
+    eventoNombre: t.evento.nombre,
+  };
+}
+
+export const repositorioHoy = {
+  async cargar(filtros?: {
+    evento?: string;
+    estado?: string;
+  }): Promise<Resultado<RespuestaHoy>> {
+    try {
+      const response = await api.get("/hoy/", { params: filtros });
+      const datos = response.data;
+      return {
+        ok: true,
+        data: {
+          generadoEn: datos.generado_en,
+          total: datos.total,
+          filtros: datos.filtros,
+          grupos: {
+            vencidas: (datos.grupos?.vencidas ?? []).map(mapTareaHoyFromApi),
+            para_hoy: (datos.grupos?.para_hoy ?? []).map(mapTareaHoyFromApi),
+            proximas: (datos.grupos?.proximas ?? []).map(mapTareaHoyFromApi),
+          },
+        },
+      };
+    } catch (e: any) {
+      console.error(e);
+      return {
+        ok: false,
+        error: "No se pudieron cargar las gestiones del día desde el servidor.",
+      };
+    }
+  },
+};

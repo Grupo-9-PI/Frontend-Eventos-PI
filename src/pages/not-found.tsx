@@ -7,7 +7,7 @@ export default function NotFound() {
       <AlertCircle className="empty-icon" size={25} />
       <h1 className="empty-title">No encontramos esta vista</h1>
       <p className="empty-copy">
-        La ruta no forma parte del espacio de trabajo de Organiza.
+        La ruta no forma parte del espacio de trabajo de EventOps.
       </p>
       <Link
         href="/hoy"
