@@ -39,7 +39,6 @@ export const CATEGORIAS = [
   { id: "proveedores", nombre: "Proveedores" },
   { id: "otro", nombre: "Otro" },
 ];
-export const PRIORIDADES: Prioridad[] = ["alta", "media", "baja"];
 
 function hoy(): string {
   const fecha = new Date();
@@ -266,3 +265,61 @@ export function timeToHours(t: string): number {
   const parts = t.split(":");
   return Number((parseInt(parts[0]) + parseInt(parts[1]) / 60).toFixed(2));
 }
+
+// ---------------------------------------------------------------------------
+// Vista Hoy: datos ya agrupados y ordenados por el backend
+// ---------------------------------------------------------------------------
+
+export type TareaHoy = Subtarea & { eventoId: string; eventoNombre: string };
+
+export type GruposHoy = {
+  vencidas: TareaHoy[];
+  para_hoy: TareaHoy[];
+  proximas: TareaHoy[];
+};
+
+export type RespuestaHoy = {
+  generadoEn: string;
+  total: number;
+  filtros: { evento: number | null; estado: string };
+  grupos: GruposHoy;
+};
+
+function mapTareaHoyFromApi(t: any): TareaHoy {
+  return {
+    ...mapSubtareaFromApi(t),
+    eventoId: t.evento.id.toString(),
+    eventoNombre: t.evento.nombre,
+  };
+}
+
+export const repositorioHoy = {
+  async cargar(filtros?: {
+    evento?: string;
+    estado?: string;
+  }): Promise<Resultado<RespuestaHoy>> {
+    try {
+      const response = await api.get("/hoy/", { params: filtros });
+      const datos = response.data;
+      return {
+        ok: true,
+        data: {
+          generadoEn: datos.generado_en,
+          total: datos.total,
+          filtros: datos.filtros,
+          grupos: {
+            vencidas: (datos.grupos?.vencidas ?? []).map(mapTareaHoyFromApi),
+            para_hoy: (datos.grupos?.para_hoy ?? []).map(mapTareaHoyFromApi),
+            proximas: (datos.grupos?.proximas ?? []).map(mapTareaHoyFromApi),
+          },
+        },
+      };
+    } catch (e: any) {
+      console.error(e);
+      return {
+        ok: false,
+        error: "No se pudieron cargar las gestiones del día desde el servidor.",
+      };
+    }
+  },
+};

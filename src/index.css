@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -21,7 +21,7 @@
   --border: 0 0% 85%;
   --card: 0 0% 100%;
   color-scheme: light;
-  accent-color: var(--primario);
+  accent-color: var(--azul-claro);
 }
 
 :root {
@@ -54,7 +54,7 @@
   --input: 0 0% 12%;
   --ring: 207 55% 48%;
   color-scheme: dark;
-  accent-color: var(--primario);
+  accent-color: var(--azul-claro);
 }
 
 * {
@@ -1093,4 +1093,35 @@ select option {
 input:invalid:not(:placeholder-shown) {
   border-color: var(--oxido) !important;
   outline-color: var(--oxido) !important;
+}
+
+.rule-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--linea);
+  border-left: 3px solid var(--azul-claro);
+  border-radius: var(--radio-md);
+  padding: 12px 15px;
+  margin-bottom: 18px;
+  font-size: 12px;
+  color: var(--apagado);
+}
+.rule-banner strong {
+  color: var(--papel);
+  font-family: var(--fuente-titulo);
+  font-size: 13px;
+}
+.form-error {
+  background: rgba(209, 81, 47, 0.12);
+  border: 1px solid rgba(209, 81, 47, 0.55);
+  color: var(--oxido);
+  border-radius: var(--radio-md);
+  padding: 10px 12px;
+  font-size: 12.5px;
+}
+.button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
