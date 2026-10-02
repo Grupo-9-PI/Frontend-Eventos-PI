@@ -285,9 +285,18 @@ export type RespuestaHoy = {
   grupos: GruposHoy;
 };
 
+// El endpoint /hoy usa nombres propios (titulo, fecha_limite), distintos a /subtareas/.
 function mapTareaHoyFromApi(t: any): TareaHoy {
   return {
-    ...mapSubtareaFromApi(t),
+    id: t.id.toString(),
+    titulo: t.titulo,
+    categoria: (t.categoria ?? "OTRO").toLowerCase(),
+    prioridad: t.prioridad,
+    estado: t.estado,
+    fechaLimite: t.fecha_limite,
+    horaLimite: t.hora_limite.slice(0, 5),
+    horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
+    estimacion: Number(t.estimacion_horas),
     eventoId: t.evento.id.toString(),
     eventoNombre: t.evento.nombre,
   };
