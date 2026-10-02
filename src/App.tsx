@@ -219,7 +219,8 @@ function App() {
           <Switch>
             <Route path="/login" component={LoginPage} />
             <Route path="/registro" component={RegisterPage} />
-            <Route path="/:rest*">
+            <Route path="/recuperar" component={RecuperarPasswordPage} />
+            <Route>
               <ProtectedRoute>
                 <Shell />
               </ProtectedRoute>
@@ -2836,6 +2837,148 @@ function RegisterPage() {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function RecuperarPasswordPage() {
+  const [, setLocation] = useLocation();
+  const [correo, setCorreo] = useState("");
+  const [enviado, setEnviado] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (correo) {
+      setEnviado(true);
+      setTimeout(() => setLocation("/login"), 4000);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        height: "100vh",
+        backgroundColor: "var(--papel)",
+        color: "var(--tinta)",
+      }}
+    >
+      <div
+        style={{
+          margin: "auto",
+          padding: "2rem",
+          width: "100%",
+          maxWidth: 400,
+          backgroundColor: "var(--fondo)",
+          borderRadius: 12,
+          boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
+          textAlign: "center",
+        }}
+      >
+        <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
+          Recuperar Contraseña
+        </h1>
+        {enviado ? (
+          <div>
+            <p
+              style={{
+                color: "var(--exito)",
+                fontSize: "0.95rem",
+                marginBottom: "1.5rem",
+              }}
+            >
+              Se ha enviado un enlace de recuperación a tu correo. Revisa tu
+              bandeja de entrada o spam.
+            </p>
+            <button
+              onClick={() => setLocation("/login")}
+              style={{
+                width: "100%",
+                padding: "0.75rem",
+                backgroundColor: "var(--primario)",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontWeight: "bold",
+              }}
+            >
+              Volver al Inicio
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ textAlign: "left" }}>
+            <p
+              style={{
+                fontSize: "0.95rem",
+                color: "var(--apagado)",
+                marginBottom: "1.5rem",
+                textAlign: "center",
+              }}
+            >
+              Ingresa el correo electrónico asociado a tu cuenta para enviarte
+              un enlace de recuperación.
+            </p>
+            <div style={{ marginBottom: "1.5rem" }}>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "0.5rem",
+                  fontSize: "0.85rem",
+                  fontWeight: "bold",
+                  color: "var(--tinta)",
+                }}
+              >
+                Correo electrónico
+              </label>
+              <input
+                type="email"
+                required
+                value={correo}
+                onChange={(e) => setCorreo(e.target.value)}
+                placeholder="tu@correo.com"
+                style={{
+                  width: "100%",
+                  padding: "0.75rem",
+                  backgroundColor: "var(--papel)",
+                  border: "1px solid var(--borde)",
+                  borderRadius: 6,
+                  color: "var(--tinta)",
+                }}
+              />
+            </div>
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                padding: "0.75rem",
+                backgroundColor: "var(--primario)",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontWeight: "bold",
+                marginBottom: "1rem",
+              }}
+            >
+              Enviar enlace de recuperación
+            </button>
+            <div style={{ textAlign: "center" }}>
+              <span
+                onClick={() => setLocation("/login")}
+                style={{
+                  fontSize: 12,
+                  color: "var(--primario)",
+                  cursor: "pointer",
+                  fontWeight: "bold",
+                }}
+              >
+                ← Volver al inicio de sesión
+              </span>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
