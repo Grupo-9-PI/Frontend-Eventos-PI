@@ -1006,15 +1006,6 @@ function Hoy() {
           </Link>
         }
       />
-      <div className="rule-banner" aria-label="Regla de prioridad">
-        <strong>Regla de prioridad</strong>
-        <span>
-          Primero las gestiones vencidas (cuya fecha y hora límite ya pasó),
-          después las que vencen hoy y al final las próximas. Dentro de cada
-          grupo va arriba la fecha más cercana y, si dos coinciden, la de menor
-          esfuerzo estimado.
-        </span>
-      </div>
       {eventos.length === 0 ? (
         <EmptyState
           titulo="Todavía no hay eventos"
