@@ -912,8 +912,9 @@ function Hoy() {
       fechaLimite: fecha,
       horaLimite: hora,
     });
-    if (problema) {
-      window.alert(problema);
+    const mensajes = Object.values(problema);
+    if (mensajes.length > 0) {
+      window.alert(mensajes.join(" "));
       return;
     }
     if (
@@ -2177,7 +2178,7 @@ function ReprogramarDialog({
       horaLimite: hora,
     });
     if (Object.keys(problema).length > 0) {
-      setError("Asegúrate de colocar fecha y hora.");
+      setError(Object.values(problema).join(" "));
       return;
     }
     onSave(fecha, hora);
