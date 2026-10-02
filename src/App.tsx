@@ -2469,12 +2469,8 @@ function LoginPage() {
             <div className="field">
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <label style={{ color: "var(--papel)" }}>Contraseña</label>
-                <a
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setLocation("/recuperar");
-                  }}
+                <span
+                  onClick={() => setLocation("/recuperar")}
                   style={{
                     cursor: "pointer",
                     fontSize: 12,
@@ -2482,7 +2478,7 @@ function LoginPage() {
                   }}
                 >
                   ¿Olvidaste tu contraseña?
-                </a>
+                </span>
               </div>
               <input type="password" required placeholder="••••••••" />
             </div>
