@@ -1315,7 +1315,7 @@ function CrearEvento() {
     setTareas(tareasNuevas);
   };
 
-  const submit = async (e: FormEvent) => {
+  const intentarSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError({});
 
