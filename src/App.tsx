@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -14,6 +15,7 @@ import {
   ChevronRight,
   Clock3,
   Compass,
+  HelpCircle,
   LayoutDashboard,
   ListChecks,
   MapPin,
@@ -226,6 +228,152 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
 }
 
+function InfoReglaPrioridad() {
+  const [abiertoHover, setAbiertoHover] = useState(false);
+  const [abiertoClick, setAbiertoClick] = useState(false);
+  const [alinearDerecha, setAlinearDerecha] = useState(false);
+  const contenedorRef = useRef<HTMLDivElement>(null);
+
+  const abierto = abiertoHover || abiertoClick;
+
+  useEffect(() => {
+    if (!abierto) return;
+
+    if (contenedorRef.current) {
+      const rect = contenedorRef.current.getBoundingClientRect();
+      setAlinearDerecha(rect.left + 350 > window.innerWidth);
+    }
+
+    const handleClickFuera = (e: MouseEvent) => {
+      if (
+        contenedorRef.current &&
+        !contenedorRef.current.contains(e.target as Node)
+      ) {
+        setAbiertoClick(false);
+        setAbiertoHover(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAbiertoClick(false);
+        setAbiertoHover(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickFuera);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickFuera);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [abierto]);
+
+  return (
+    <div
+      ref={contenedorRef}
+      onMouseEnter={() => setAbiertoHover(true)}
+      onMouseLeave={() => setAbiertoHover(false)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        position: "relative",
+        marginLeft: 12,
+        verticalAlign: "middle",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setAbiertoClick((prev) => !prev)}
+        aria-expanded={abierto}
+        aria-haspopup="dialog"
+        title="¿Cómo se ordena?"
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: "4px 6px",
+          borderRadius: 4,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          cursor: "pointer",
+          color: abierto ? "var(--papel)" : "var(--apagado)",
+          fontSize: 12,
+          fontWeight: 500,
+          transition: "color 0.15s ease",
+          outline: "none",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = "var(--papel)";
+        }}
+        onMouseLeave={(e) => {
+          if (!abierto) {
+            e.currentTarget.style.color = "var(--apagado)";
+          }
+        }}
+      >
+        <HelpCircle size={14} style={{ flexShrink: 0 }} />
+        <span>¿Cómo se ordena?</span>
+      </button>
+
+      {abierto && (
+        <div
+          role="tooltip"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 8px)",
+            left: alinearDerecha ? "auto" : 0,
+            right: alinearDerecha ? 0 : "auto",
+            zIndex: 1000,
+            width: 340,
+            maxWidth: "calc(100vw - 32px)",
+            background: "#18181b",
+            color: "#f3f4f6",
+            border: "1px solid rgba(255, 255, 255, 0.18)",
+            borderRadius: 8,
+            padding: "14px 16px",
+            boxShadow:
+              "0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.5)",
+            textAlign: "left",
+            lineHeight: 1.5,
+            pointerEvents: "auto",
+          }}
+        >
+          <div
+            style={{
+              fontWeight: 600,
+              fontSize: 13,
+              color: "#ffffff",
+              marginBottom: 6,
+              letterSpacing: "-0.01em",
+            }}
+          >
+            <span style={{ color: "#9ca3af", fontWeight: 500, marginRight: 4 }}>
+              Título:
+            </span>
+            Regla de prioridad
+          </div>
+          <div
+            style={{
+              margin: 0,
+              fontSize: 12,
+              color: "#d1d5db",
+              lineHeight: 1.5,
+            }}
+          >
+            <span style={{ color: "#9ca3af", fontWeight: 500, marginRight: 4 }}>
+              Cuerpo:
+            </span>
+            Las subtareas se agrupan en Retrasadas, Para hoy y Próximas según su
+            fecha objetivo. Dentro de cada grupo se ordenan por fecha (más
+            antigua/cercana primero).
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Shell() {
   const [tema, setTema] = useState(
     () => document.documentElement.getAttribute("data-theme") || "dark",
@@ -428,44 +576,43 @@ function Shell() {
             </button>
           </div>
         </header>
-        {!cargando && eventos.length > 0 && (
-          <div
-            style={{ maxWidth: 1180, margin: "0 auto", padding: "16px 48px 0" }}
-            className="active-picker"
+        <div
+          style={{ maxWidth: 1180, margin: "0 auto", padding: "16px 48px 0" }}
+          className="active-picker"
+        >
+          <label
+            htmlFor="selector-evento-activo"
+            className="muted"
+            style={{ fontSize: 11, marginRight: 9 }}
           >
-            <label
-              htmlFor="selector-evento-activo"
-              className="muted"
-              style={{ fontSize: 11, marginRight: 9 }}
-            >
-              Evento activo
-            </label>
-            <select
-              id="selector-evento-activo"
-              value={eventoActivo}
-              onChange={(e) => navegarEvento(e.target.value)}
-              style={{
-                width: "auto",
-                minWidth: 220,
-                padding: "7px 9px",
-                fontSize: 12,
-              }}
-            >
-              <option value="">Consultar eventos…</option>
-              {eventos
-                .filter(
-                  (e) =>
-                    diferenciaDias(hoyISO(), e.fechaInicio) >= 0 ||
-                    e.subtareas.some((t) => t.estado !== "hecho"),
-                )
-                .map((evento) => (
-                  <option key={evento.id} value={evento.id}>
-                    {evento.nombre}
-                  </option>
-                ))}
-            </select>
-          </div>
-        )}
+            Evento activo
+          </label>
+          <select
+            id="selector-evento-activo"
+            value={eventoActivo}
+            onChange={(e) => navegarEvento(e.target.value)}
+            style={{
+              width: "auto",
+              minWidth: 220,
+              padding: "7px 9px",
+              fontSize: 12,
+            }}
+          >
+            <option value="">Consultar eventos…</option>
+            {eventos
+              .filter(
+                (e) =>
+                  diferenciaDias(hoyISO(), e.fechaInicio) >= 0 ||
+                  e.subtareas.some((t) => t.estado !== "hecho"),
+              )
+              .map((evento) => (
+                <option key={evento.id} value={evento.id}>
+                  {evento.nombre}
+                </option>
+              ))}
+          </select>
+          <InfoReglaPrioridad />
+        </div>
         <main className="content">
           {cargando ? (
             <Loading />
