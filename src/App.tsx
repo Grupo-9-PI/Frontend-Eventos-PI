@@ -2865,7 +2865,7 @@ function RecuperarPasswordPage() {
         display: "flex",
         height: "100vh",
         backgroundColor: "var(--papel)",
-        color: "var(--tinta)",
+        color: "var(--papel)",
       }}
     >
       <div
@@ -2874,7 +2874,7 @@ function RecuperarPasswordPage() {
           padding: "2rem",
           width: "100%",
           maxWidth: 400,
-          backgroundColor: "var(--fondo)",
+          background: "var(--panel)",
           borderRadius: 12,
           boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
           textAlign: "center",
@@ -2931,7 +2931,7 @@ function RecuperarPasswordPage() {
                   marginBottom: "0.5rem",
                   fontSize: "0.85rem",
                   fontWeight: "bold",
-                  color: "var(--tinta)",
+                  color: "var(--papel)",
                 }}
               >
                 Correo electrónico
@@ -2948,7 +2948,7 @@ function RecuperarPasswordPage() {
                   backgroundColor: "var(--papel)",
                   border: "1px solid var(--borde)",
                   borderRadius: 6,
-                  color: "var(--tinta)",
+                  color: "var(--papel)",
                 }}
               />
             </div>
