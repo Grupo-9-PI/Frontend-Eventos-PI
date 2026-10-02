@@ -984,7 +984,9 @@ function Hoy() {
         eyebrow="Panel de control"
         titulo="Hoy"
         descripcion={
-          total ? `${total} gestiones abiertas.` : "El plan está despejado."
+          total
+            ? `${total} ${total === 1 ? "gestión abierta" : "gestiones abiertas"}.`
+            : "El plan está despejado."
         }
         accion={
           <Link href="/crear" className="button button-primary">
@@ -1496,12 +1498,11 @@ function CrearEvento() {
                 <div className="field-error">{error.duracion}</div>
               )}
               <input
-                type="text"
-                pattern="^([0-9]{1,2}):([0-5][0-9])$"
-                placeholder="00:00"
+                type="time"
                 className={error.duracion ? "error" : ""}
                 value={datos.duracion}
                 onChange={(e) => setCampo("duracion", e.target.value)}
+                aria-label="Duración del evento en horas y minutos"
               />
             </div>
             <div className="field full">
@@ -1639,14 +1640,13 @@ function CrearEvento() {
                       <div className="field-error">{errorNuevo.estimacion}</div>
                     )}
                     <input
-                      type="text"
+                      type="time"
                       className={errorNuevo.estimacion ? "error" : ""}
-                      pattern="^([0-9]{1,2}):([0-5][0-9])$"
-                      placeholder="00:00"
                       value={nuevo.estimacion}
                       onChange={(e) =>
                         setNuevo({ ...nuevo, estimacion: e.target.value })
                       }
+                      aria-label="Estimación de la gestión en horas y minutos"
                     />
                   </div>
                   <div className="field">
@@ -1701,8 +1701,8 @@ function validarDatosEvento(
     if (!datos.fechaInicio) e.fechaInicio = "Elige una fecha.";
     if (!datos.fechaFin) e.fechaFin = "Elige una fecha.";
   } else if (datos.fechaFin < datos.fechaInicio) e.fechaFin = "Inválida.";
-  if (!datos.lugar.trim()) e.lugar = "Obligatorio.";
-  if (timeToHours(datos.duracion) <= 0) e.duracion = "Requerida.";
+  if (timeToHours(datos.duracion) <= 0)
+    e.duracion = "Indica una duración mayor a 0.";
 
   if (!datos.horaEvento) e.horaEvento = "Obligatoria.";
   if (mostrarPlan && !tareas.length)
@@ -2009,12 +2009,11 @@ function TaskEditor({
             <div className="field-error">{error.estimacion}</div>
           )}
           <input
-            type="text"
-            pattern="^([0-9]{1,2}):([0-5][0-9])$"
-            placeholder="00:00"
+            type="time"
             className={error.estimacion ? "error" : ""}
             value={tarea.estimacion}
             onChange={(e) => setTarea({ ...tarea, estimacion: e.target.value })}
+            aria-label="Estimación de la gestión en horas y minutos"
           />
         </div>
       </div>
