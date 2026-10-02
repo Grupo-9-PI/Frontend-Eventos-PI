@@ -32,14 +32,6 @@ export type Evento = {
 
 export type Resultado<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export const CATEGORIAS = [
-  { id: "salon", nombre: "Salón" },
-  { id: "invitaciones", nombre: "Invitaciones" },
-  { id: "catering", nombre: "Catering" },
-  { id: "proveedores", nombre: "Proveedores" },
-  { id: "otro", nombre: "Otro" },
-];
-
 function hoy(): string {
   const fecha = new Date();
   const local = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000);

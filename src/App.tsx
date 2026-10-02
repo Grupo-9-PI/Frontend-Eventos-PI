@@ -39,7 +39,6 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
 import { useAuth } from "./Root";
 import {
-  CATEGORIAS,
   combinarFechaHora,
   hoursToTime,
   timeToHours,
@@ -102,8 +101,9 @@ function useDatos(activo: boolean) {
   const [errorCarga, setErrorCarga] = useState("");
   const [aviso, setAviso] = useState<Aviso | null>(null);
 
-  const cargarTodo = async () => {
-    setCargando(true);
+  const cargarTodo = async (mostrarCarga = true) => {
+    if (mostrarCarga) setCargando(true);
+    const inicio = Date.now();
     const [resEventos, resHoy] = await Promise.all([
       repositorioEventos.cargar(),
       repositorioHoy.cargar(),
@@ -114,7 +114,14 @@ function useDatos(activo: boolean) {
     if (resHoy.ok) setHoy(resHoy.data);
     else errores.push(resHoy.error);
     setErrorCarga(errores.length ? errores.join(" ") : "");
-    setCargando(false);
+    if (mostrarCarga) {
+      // Tiempo mínimo visible para que el esqueleto no parpadee con respuestas rapidas.
+      const restante = 400 - (Date.now() - inicio);
+      if (restante > 0) {
+        await new Promise((resolver) => window.setTimeout(resolver, restante));
+      }
+      setCargando(false);
+    }
   };
 
   useEffect(() => {
@@ -152,7 +159,7 @@ function useDatos(activo: boolean) {
       const creada = await repositorioEventos.crearSubtarea(res.data.id, t);
       if (!creada.ok) fallidas.push(t.titulo);
     }
-    await cargarTodo();
+    await cargarTodo(false);
     if (fallidas.length) {
       notifyError(
         `El evento se creó, pero no se pudieron guardar ${fallidas.length} gestión(es): ${fallidas.join(", ")}.`,
@@ -171,7 +178,7 @@ function useDatos(activo: boolean) {
       notifyError(res.error);
       return false;
     }
-    await cargarTodo();
+    await cargarTodo(false);
     notifySuccess("Evento actualizado.");
     return true;
   };
@@ -181,7 +188,7 @@ function useDatos(activo: boolean) {
       notifyError(res.error);
       return false;
     }
-    await cargarTodo();
+    await cargarTodo(false);
     notifySuccess("Evento eliminado.");
     return true;
   };
@@ -191,7 +198,7 @@ function useDatos(activo: boolean) {
       notifyError(res.error);
       return false;
     }
-    await cargarTodo();
+    await cargarTodo(false);
     notifySuccess("Gestión agregada.");
     return true;
   };
@@ -201,7 +208,7 @@ function useDatos(activo: boolean) {
       notifyError(res.error);
       return false;
     }
-    await cargarTodo();
+    await cargarTodo(false);
     notifySuccess("Gestión actualizada.");
     return true;
   };
@@ -211,7 +218,7 @@ function useDatos(activo: boolean) {
       notifyError(res.error);
       return false;
     }
-    await cargarTodo();
+    await cargarTodo(false);
     notifySuccess("Gestión eliminada.");
     return true;
   };
@@ -832,9 +839,6 @@ function FilaTarea({
           </span>
           <span>{hoursToTime(tarea.estimacion)} horas estimadas</span>
           {tarea.horaInicio && <span>Inicio {tarea.horaInicio}</span>}
-          <span className="tag">
-            {CATEGORIAS.find((c) => c.id === tarea.categoria)?.nombre ?? "Otro"}
-          </span>
           {tarea.estado === "en_progreso" && (
             <span className="tag tag-urgent">En curso</span>
           )}
@@ -1128,7 +1132,6 @@ function TarjetaEvento({ evento }: { evento: Evento }) {
     <Link href={"/evento/" + evento.id} className="card event-card">
       <div className="event-card-top">
         <div>
-          <div className="event-type">{evento.tipo}</div>
           <h2 className="event-name">{evento.nombre}</h2>
         </div>
         <ChevronRight size={17} color="#777" />

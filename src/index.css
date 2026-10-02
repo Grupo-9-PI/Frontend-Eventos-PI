@@ -534,16 +534,9 @@ p {
   align-items: flex-start;
   gap: 12px;
 }
-.event-type {
-  color: var(--azul-claro);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 10px;
-  font-weight: 600;
-}
 .event-name {
   font-size: 19px;
-  margin-top: 7px;
+  margin-top: 0;
 }
 .event-info {
   color: var(--apagado);
@@ -960,7 +953,7 @@ select option {
   height: 58px;
   background: linear-gradient(90deg, #232323, #303030, #232323);
   background-size: 200% 100%;
-  animation: shimmer 1.2s infinite;
+  animation: shimmer 1.8s infinite;
   border-radius: 4px;
 }
 @keyframes shimmer {
