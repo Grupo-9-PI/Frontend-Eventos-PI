@@ -398,9 +398,10 @@ function InfoReglaPrioridad() {
               lineHeight: 1.5,
             }}
           >
-            Primero las gestiones vencidas, después las que vencen hoy y al
-            final las próximas. Dentro de cada grupo va arriba la fecha más
-            cercana y, si dos coinciden, la de menor esfuerzo estimado.
+            Primero las gestiones vencidas (cuya fecha y hora límite ya pasó),
+            después las que vencen hoy y al final las próximas. Dentro de cada
+            grupo va arriba la fecha más cercana y, si dos coinciden, la de
+            menor esfuerzo estimado.
           </div>
         </div>
       )}
@@ -786,17 +787,23 @@ function calcularPorcentaje(evento: Evento) {
       )
     : 0;
 }
-function estadoFecha(fecha: string) {
-  const dias = diferenciaDias(hoyISO(), fecha);
-  return dias < 0 ? "overdue" : dias === 0 ? "today" : "";
+function estaVencida(tarea: { fechaLimite: string; horaLimite: string }) {
+  return combinarFechaHora(tarea.fechaLimite, tarea.horaLimite) < Date.now();
+}
+function estadoFecha(tarea: { fechaLimite: string; horaLimite: string }) {
+  if (estaVencida(tarea)) return "overdue";
+  return diferenciaDias(hoyISO(), tarea.fechaLimite) === 0 ? "today" : "";
 }
 function textoPlazo(tarea: Subtarea) {
-  const dias = diferenciaDias(hoyISO(), tarea.fechaLimite);
-  return dias < 0
-    ? "Retrasada · " + fechaHoraBonita(tarea.fechaLimite, tarea.horaLimite)
-    : dias === 0
-      ? "Hoy · " + tarea.horaLimite
-      : fechaHoraBonita(tarea.fechaLimite, tarea.horaLimite);
+  if (estaVencida(tarea)) {
+    const dias = diferenciaDias(hoyISO(), tarea.fechaLimite);
+    return dias === 0
+      ? "Vencida hoy · " + tarea.horaLimite
+      : "Retrasada · " + fechaHoraBonita(tarea.fechaLimite, tarea.horaLimite);
+  }
+  return diferenciaDias(hoyISO(), tarea.fechaLimite) === 0
+    ? "Hoy · " + tarea.horaLimite
+    : fechaHoraBonita(tarea.fechaLimite, tarea.horaLimite);
 }
 function FilaTarea({
   tarea,
@@ -813,7 +820,7 @@ function FilaTarea({
   onEditar?: () => void;
   onEliminar?: () => void;
 }) {
-  const fecha = estadoFecha(tarea.fechaLimite);
+  const fecha = estadoFecha(tarea);
   return (
     <div className={"task-row " + fecha}>
       <input
@@ -1002,9 +1009,10 @@ function Hoy() {
       <div className="rule-banner" aria-label="Regla de prioridad">
         <strong>Regla de prioridad</strong>
         <span>
-          Primero las gestiones vencidas, después las que vencen hoy y al final
-          las próximas. Dentro de cada grupo va arriba la fecha más cercana y,
-          si dos coinciden, la de menor esfuerzo estimado.
+          Primero las gestiones vencidas (cuya fecha y hora límite ya pasó),
+          después las que vencen hoy y al final las próximas. Dentro de cada
+          grupo va arriba la fecha más cercana y, si dos coinciden, la de menor
+          esfuerzo estimado.
         </span>
       </div>
       {eventos.length === 0 ? (
