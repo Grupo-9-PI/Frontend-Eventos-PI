@@ -2159,8 +2159,8 @@ function ConfirmDialog({
             style={{
               flex: 1,
               padding: "11px",
-              background: isDanger ? "#d33833" : "var(--azul-medio)",
-              border: `1px solid ${isDanger ? "#d33833" : "var(--azul-medio)"}`,
+              background: isDanger ? "#d33833" : "var(--azul)",
+              border: `1px solid ${isDanger ? "#d33833" : "var(--azul)"}`,
               color: "#fff",
               fontWeight: 500,
               borderRadius: 8,
