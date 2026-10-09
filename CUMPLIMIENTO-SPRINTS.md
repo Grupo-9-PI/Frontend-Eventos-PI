@@ -1,11 +1,12 @@
 # Cumplimiento de criterios por Sprint — Frontend
 
 Este documento describe, para el repositorio **Frontend-Eventos-PI**, todo lo que ya está
-implementado en relación con los criterios de los sprints 0, 1 y 2. La rama de trabajo es
-`feature/sprint-hoy-wiring`.
+implementado en relación con los criterios de los sprints 0, 1, 2 y 3. Las ramas de trabajo han sido
+`feature/sprint-hoy-wiring` y `feature/sprint3-capacidad-conflictos`.
 
-El backend que consume está en **Backend-Eventos-PI** (`feature/sprint-auth-hoy`), documentado en
-su propio `CUMPLIMIENTO-SPRINTS.md`.
+El backend que consume está en **Backend-Eventos-PI** (`feature/sprint-auth-hoy`,
+`feat/backend-limites-horas` y `feature/sprint3-capacidad-conflictos`), documentado en su propio
+`CUMPLIMIENTO-SPRINTS.md`.
 
 ---
 
@@ -134,6 +135,59 @@ el Documento Único):
   eventos, gestiones y `/hoy/`, incluyendo errores de red en un resultado tipado.
 - Endpoints consumidos: `/auth/login/`, `/auth/registro/`, `/auth/logout/`, `/auth/me/`,
   `/eventos/` (CRUD), `/subtareas/` (CRUD) y `/hoy/`.
+
+---
+
+## Sprint 3 — Capacidad diaria, reprogramación y resolución de conflictos
+
+### C1 — Reprogramar gestiones y verlo reflejado en `/hoy`
+
+- La acción **Mover** (en `/hoy` y en el detalle del evento) guarda con
+  `PATCH /api/subtareas/{id}/reprogramar/` y refresca los datos: la gestión cambia de grupo
+  (Vencidas / Para hoy / Próximas) de inmediato.
+- Confirmación no intrusiva: *"Fecha actualizada: la gestión se movió al …"*.
+- Error de red o servidor: mensaje claro en el diálogo y **Confirmar** conserva fecha, hora y
+  esfuerzo ingresados para reintentar.
+
+### C2 — Límite diario configurable (persistido en la cuenta)
+
+- La tarjeta **Límite de trabajo diario** en `/hoy` lee y guarda contra `GET/PUT /api/config/`
+  (se eliminó el almacenamiento local del límite).
+- Valor por defecto 6 h cuando no hay registro; validación en cliente y servidor de **1 a 16 h**.
+- Estados: guardando ("Guardando…"), éxito ("Capacidad actualizada") y error con el input intacto.
+
+### C3 — Conflicto de sobrecarga con cifras explícitas
+
+- Al confirmar una reprogramación, el backend evalúa la carga del día (sin contar gestiones hechas)
+  y responde `409` con las cifras. El diálogo muestra:
+  *"Para el … quedarías con **X h planificadas** (límite **Y h**), un exceso de Z h"* y cuántas
+  horas aportan otras gestiones abiertas de ese día.
+- Se listan hasta 3 **fechas sugeridas** por el servidor, cada una con su carga proyectada.
+
+### C4 — Resolución del conflicto (2 estrategias funcionales)
+
+- **Mover a un día con capacidad:** `POST /api/subtareas/{id}/resolver-conflicto/` con
+  `mover_otro_dia`; si el recálculo confirma, se cierra el diálogo y `/hoy` refleja el cambio.
+- **Reducir la estimación:** estrategia `reducir_horas`; si aún excede el límite, el diálogo lo
+  informa con las nuevas cifras y nuevas sugerencias (el cambio ya quedó persistido).
+- El presupuesto local del evento (feature previa) se mantiene como **guardia secundario** con su
+  propio aviso y opción de reducir horas.
+
+### C5 — Calidad IxD del diálogo de conflicto
+
+- Microcopy en español sin jerga técnica, botones con verbo ("Usar esta fecha", "Aplicar horas",
+  "Revisar fecha"), estado "Guardando…" y feedback inmediato (toast) al resolver.
+- Accesibilidad: `role="alertdialog"`, `aria-modal`, foco automático en el diálogo, cierre con
+  `Escape` y retorno del foco al abrir/cerrar.
+- El diálogo distingue el origen del límite (CAPACIDAD DIARIA vs PRESUPUESTO DEL EVENTO).
+
+### C5 (API) — Endpoints del Sprint 3 consumidos por la UI
+
+| Método | Ruta | Uso en la UI |
+| --- | --- | --- |
+| GET/PUT | `/api/config/` | Leer y guardar el límite diario del organizador. |
+| PATCH | `/api/subtareas/{id}/reprogramar/` | Guardar la reprogramación y recibir el 409 con cifras y fechas sugeridas. |
+| POST | `/api/subtareas/{id}/resolver-conflicto/` | Aplicar `mover_otro_dia` o `reducir_horas` y leer `resuelto` + totales. |
 
 ---
 

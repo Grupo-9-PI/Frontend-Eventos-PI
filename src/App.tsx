@@ -47,14 +47,19 @@ import {
   fechaHoraBonita,
   generarId,
   hoyISO,
+  repositorioConfiguracion,
   repositorioEventos,
   repositorioHoy,
   sumarDias,
+  type ConflictoSobrecarga,
   type Evento,
   type EstadoSubtarea,
   type GruposHoy,
   type Prioridad,
   type RespuestaHoy,
+  type RespuestaResolverConflicto,
+  type Resultado,
+  type ResultadoReprogramacion,
   type Subtarea,
   type TareaHoy,
 } from "@/lib/repositorioEventos";
@@ -67,8 +72,19 @@ type Store = {
   cargando: boolean;
   errorCarga: string;
   aviso: Aviso | null;
+  limiteDiario: number;
   refrescar: () => void;
   quitarAviso: () => void;
+  actualizarLimiteDiario: (horas: number) => Promise<string | null>;
+  reprogramarSubtarea: (
+    id: string,
+    cambios: { fechaLimite: string; horaLimite: string; estimacion: number },
+  ) => Promise<ResultadoReprogramacion>;
+  resolverConflictoSubtarea: (
+    id: string,
+    estrategia: "mover_otro_dia" | "reducir_horas",
+    datos: { plazo?: string; horaLimite?: string; estimacion?: number },
+  ) => Promise<Resultado<RespuestaResolverConflicto>>;
   crearEventoCompleto: (
     evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
     tareas: Omit<Subtarea, "id">[],
@@ -98,6 +114,7 @@ function useStore(): Store {
 function useDatos(activo: boolean) {
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [hoy, setHoy] = useState<RespuestaHoy | null>(null);
+  const [limiteDiario, setLimiteDiario] = useState(LIMITE_DIARIO_PREDETERMINADO);
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState("");
   const [aviso, setAviso] = useState<Aviso | null>(null);
@@ -105,15 +122,18 @@ function useDatos(activo: boolean) {
   const cargarTodo = async (mostrarCarga = true) => {
     if (mostrarCarga) setCargando(true);
     const inicio = Date.now();
-    const [resEventos, resHoy] = await Promise.all([
+    const [resEventos, resHoy, resConfig] = await Promise.all([
       repositorioEventos.cargar(),
       repositorioHoy.cargar(),
+      repositorioConfiguracion.cargar(),
     ]);
     const errores: string[] = [];
     if (resEventos.ok) setEventos(resEventos.data);
     else errores.push(resEventos.error);
     if (resHoy.ok) setHoy(resHoy.data);
     else errores.push(resHoy.error);
+    if (resConfig.ok) setLimiteDiario(resConfig.data);
+    else errores.push(resConfig.error);
     setErrorCarga(errores.length ? errores.join(" ") : "");
     if (mostrarCarga) {
       // Tiempo mínimo visible para que el esqueleto no parpadee con respuestas rapidas.
@@ -129,6 +149,7 @@ function useDatos(activo: boolean) {
     if (!activo) {
       setEventos([]);
       setHoy(null);
+      setLimiteDiario(LIMITE_DIARIO_PREDETERMINADO);
       setErrorCarga("");
       setCargando(false);
       return;
@@ -223,6 +244,41 @@ function useDatos(activo: boolean) {
     notifySuccess("Gestión eliminada.");
     return true;
   };
+  const actualizarLimiteDiario = async (horas: number) => {
+    const res = await repositorioConfiguracion.actualizar(horas);
+    if (!res.ok) return res.error;
+    setLimiteDiario(res.data);
+    return null;
+  };
+  const reprogramarSubtarea = async (
+    id: string,
+    cambios: { fechaLimite: string; horaLimite: string; estimacion: number },
+  ) => {
+    const res = await repositorioEventos.reprogramar(id, cambios);
+    if (res.ok) {
+      await cargarTodo(false);
+      notifySuccess(
+        `Fecha actualizada: la gestión se movió al ${fechaHoraBonita(cambios.fechaLimite)}.`,
+      );
+    }
+    return res;
+  };
+  const resolverConflictoSubtarea = async (
+    id: string,
+    estrategia: "mover_otro_dia" | "reducir_horas",
+    datos: { plazo?: string; horaLimite?: string; estimacion?: number },
+  ) => {
+    const res = await repositorioEventos.resolverConflicto(id, estrategia, datos);
+    if (res.ok) {
+      await cargarTodo(false);
+      if (res.data.resuelto) {
+        notifySuccess(
+          "Conflicto resuelto: el plan del día quedó dentro de tu capacidad.",
+        );
+      }
+    }
+    return res;
+  };
 
   return {
     eventos,
@@ -230,8 +286,12 @@ function useDatos(activo: boolean) {
     cargando,
     errorCarga,
     aviso,
+    limiteDiario,
     refrescar: cargarTodo,
     quitarAviso: () => setAviso(null),
+    actualizarLimiteDiario,
+    reprogramarSubtarea,
+    resolverConflictoSubtarea,
     crearEventoCompleto,
     actualizarEvento,
     eliminarEvento,
@@ -878,10 +938,6 @@ function FilaTarea({
 const LIMITE_DIARIO_PREDETERMINADO = 6;
 const PRESUPUESTO_EVENTO_PREDETERMINADO = 6;
 
-function claveLimiteDiario(usuarioId: number | null) {
-  return `eventops:limite-diario:${usuarioId ?? "anonimo"}`;
-}
-
 function clavePresupuestoEvento(usuarioId: number | null, eventoId: string) {
   return `eventops:presupuesto-trabajo:${usuarioId ?? "anonimo"}:${eventoId}`;
 }
@@ -958,6 +1014,7 @@ function validarCapacidadesTarea(
   eventoId: string,
   candidata: Subtarea,
   usuarioId: number | null,
+  limiteDiario: number,
   tareaExistenteId?: string,
 ) {
   if (!puedeGuardarPresupuestoEvento(usuarioId)) {
@@ -981,7 +1038,6 @@ function validarCapacidadesTarea(
     tareaExistenteId ? { eventoId, tareaId: tareaExistenteId } : undefined,
     candidata.estado === "hecho" ? 0 : candidata.estimacion,
   );
-  const limiteDiario = leerLimiteDiario(usuarioId);
   const mensajes: string[] = [];
   if (totalEvento > presupuesto) {
     mensajes.push(
@@ -994,18 +1050,6 @@ function validarCapacidadesTarea(
     );
   }
   return mensajes.length ? mensajes.join(" ") : "";
-}
-
-function leerLimiteDiario(usuarioId: number | null) {
-  try {
-    const valor = localStorage.getItem(claveLimiteDiario(usuarioId));
-    const horas = Number(valor);
-    if (valor && Number.isInteger(horas) && horas >= 1 && horas <= 16)
-      return horas;
-  } catch {
-    // El límite predeterminado permite usar la pantalla si el navegador bloquea el almacenamiento.
-  }
-  return LIMITE_DIARIO_PREDETERMINADO;
 }
 
 function sumarHorasAbiertas(
@@ -1034,40 +1078,39 @@ function sumarHorasAbiertas(
 function CapacidadDiariaHoy({
   eventos,
   fecha,
-  usuarioId,
 }: {
   eventos: Evento[];
   fecha: string;
-  usuarioId: number | null;
 }) {
-  const [limite, setLimite] = useState(() => leerLimiteDiario(usuarioId));
-  const [borrador, setBorrador] = useState(String(limite));
+  const { limiteDiario, actualizarLimiteDiario } = useStore();
+  const [borrador, setBorrador] = useState(String(limiteDiario));
   const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
   const [guardado, setGuardado] = useState(false);
   const carga = sumarHorasAbiertas(eventos, fecha);
 
-  const guardarLimite = (event: FormEvent) => {
+  useEffect(() => {
+    setBorrador(String(limiteDiario));
+  }, [limiteDiario]);
+
+  const guardarLimite = async (event: FormEvent) => {
     event.preventDefault();
-    if (
-      !/^\d+$/.test(borrador) ||
-      Number(borrador) < 1 ||
-      Number(borrador) > 16
-    ) {
+    const numero = Number(borrador);
+    if (!/^\d+$/.test(borrador.trim()) || numero < 1 || numero > 16) {
       setError("El límite debe ser un número entero entre 1 y 16 horas.");
       setGuardado(false);
       return;
     }
-    try {
-      const nuevoLimite = Number(borrador);
-      localStorage.setItem(claveLimiteDiario(usuarioId), String(nuevoLimite));
-      setLimite(nuevoLimite);
-      setBorrador(String(nuevoLimite));
-      setError("");
-      setGuardado(true);
-    } catch {
-      setError("No se pudo guardar el límite en este navegador.");
+    setGuardando(true);
+    const errorGuardado = await actualizarLimiteDiario(numero);
+    setGuardando(false);
+    if (errorGuardado) {
+      setError(errorGuardado);
       setGuardado(false);
+      return;
     }
+    setError("");
+    setGuardado(true);
   };
 
   return (
@@ -1082,14 +1125,16 @@ function CapacidadDiariaHoy({
           Define cuántas horas de gestiones abiertas quieres planificar por día.
         </p>
         <div
-          className={`daily-capacity-total${carga > limite ? " over" : ""}`}
+          className={`daily-capacity-total${carga > limiteDiario ? " over" : ""}`}
           data-testid="daily-capacity-total"
           aria-live="polite"
         >
-          <strong>{carga} h</strong> planificadas hoy de{" "}
-          <strong>{limite} h</strong>
-          {carga > limite && (
-            <span>Se supera el límite por {carga - limite} h.</span>
+          <strong>{formatoHoras(carga)} h</strong> planificadas hoy de{" "}
+          <strong>{formatoHoras(limiteDiario)} h</strong>
+          {carga > limiteDiario && (
+            <span>
+              Se supera el límite por {formatoHoras(carga - limiteDiario)} h.
+            </span>
           )}
         </div>
       </div>
@@ -1118,8 +1163,8 @@ function CapacidadDiariaHoy({
             <span>horas</span>
           </div>
           <small id="daily-capacity-help">
-            Número entero de 1 a 16. Solo se guarda en este navegador para tu
-            usuario.
+            Número entero de 1 a 16. Se guarda en tu cuenta y aplica a todas
+            tus gestiones.
           </small>
           {error && (
             <div
@@ -1137,12 +1182,13 @@ function CapacidadDiariaHoy({
             className="button button-secondary button-small"
             type="submit"
             data-testid="save-daily-capacity"
+            disabled={guardando}
           >
-            Guardar límite
+            {guardando ? "Guardando…" : "Guardar límite"}
           </button>
-          {guardado && (
+          {guardado && !error && (
             <span role="status" className="daily-capacity-saved">
-              Límite guardado
+              Capacidad actualizada
             </span>
           )}
         </div>
@@ -1154,7 +1200,6 @@ function CapacidadDiariaHoy({
 function Hoy() {
   const { eventos, hoy, errorCarga, refrescar, actualizarSubtarea } =
     useStore();
-  const { usuario } = useAuth();
   const [reprogramar, setReprogramar] = useState<{
     evento: Evento;
     tarea: Subtarea;
@@ -1172,39 +1217,6 @@ function Hoy() {
       ...tarea,
       estado: tarea.estado === "hecho" ? "pendiente" : "hecho",
     });
-  };
-
-  const moverTarea = async (
-    eventoId: string,
-    tareaId: string,
-    fecha: string,
-    hora: string,
-    estimacion: number,
-  ) => {
-    const evento = eventos.find((e) => e.id === eventoId);
-    if (!evento) return;
-    const tarea = evento.subtareas.find((t) => t.id === tareaId);
-    if (!tarea) return;
-    const problema = validarTarea({
-      ...tarea,
-      fechaLimite: fecha,
-      horaLimite: hora,
-      estimacion,
-    });
-    const mensajes = Object.values(problema);
-    if (mensajes.length > 0) {
-      window.alert(mensajes.join(" "));
-      return;
-    }
-    if (
-      await actualizarSubtarea(eventoId, {
-        ...tarea,
-        fechaLimite: fecha,
-        horaLimite: hora,
-        estimacion,
-      })
-    )
-      setReprogramar(null);
   };
 
   const bloque = (titulo: string, lista: TareaHoy[], vacio: string) => (
@@ -1279,12 +1291,7 @@ function Hoy() {
           </Link>
         }
       />
-      <CapacidadDiariaHoy
-        key={usuario?.id ?? "anonimo"}
-        eventos={eventos}
-        fecha={hoyISO()}
-        usuarioId={usuario?.id ?? null}
-      />
+      <CapacidadDiariaHoy eventos={eventos} fecha={hoyISO()} />
       {eventos.length === 0 ? (
         <EmptyState
           titulo="Todavía no hay eventos"
@@ -1317,15 +1324,6 @@ function Hoy() {
           evento={reprogramar.evento}
           tarea={reprogramar.tarea}
           onClose={() => setReprogramar(null)}
-          onSave={(fecha, hora, estimacion) =>
-            moverTarea(
-              reprogramar.evento.id,
-              reprogramar.tarea.id,
-              fecha,
-              hora,
-              estimacion,
-            )
-          }
         />
       )}
     </div>
@@ -1499,7 +1497,7 @@ const borradorInicial = (): BorradorTarea => ({
 });
 function CrearEvento() {
   const [mostrarPlan, setMostrarPlan] = useState(false);
-  const { crearEventoCompleto, eventos } = useStore();
+  const { crearEventoCompleto, eventos, limiteDiario } = useStore();
   const { usuario } = useAuth();
   const [, setLocation] = useLocation();
   const [datos, setDatos] = useState<FormEvento>(formEventoInicial);
@@ -1644,7 +1642,6 @@ function CrearEvento() {
           (acum[tarea.fechaLimite] ?? 0) + timeToHours(tarea.estimacion);
         return acum;
       }, {});
-      const limiteDiario = leerLimiteDiario(usuario?.id ?? null);
       const conflictosDia = Object.entries(porFecha)
         .map(([fecha, horas]) => ({
           fecha,
@@ -2327,6 +2324,7 @@ function DetalleEvento() {
   const { id } = useParams<{ id: string }>();
   const {
     eventos,
+    limiteDiario,
     actualizarSubtarea,
     eliminarSubtarea,
     eliminarEvento,
@@ -2445,6 +2443,7 @@ function DetalleEvento() {
               evento.id,
               t as Subtarea,
               usuario?.id ?? null,
+              limiteDiario,
               tareaEditar.id,
             );
             if (problema) return problema;
@@ -2458,17 +2457,6 @@ function DetalleEvento() {
           evento={evento}
           tarea={mover}
           onClose={() => setMover(null)}
-          onSave={async (fecha, hora, estimacion) => {
-            if (
-              await actualizarSubtarea(evento.id, {
-                ...mover,
-                fechaLimite: fecha,
-                horaLimite: hora,
-                estimacion,
-              })
-            )
-              setMover(null);
-          }}
         />
       )}
       <div className="detail-layout">
@@ -2486,6 +2474,7 @@ function DetalleEvento() {
                     evento.id,
                     t as Subtarea,
                     usuario?.id ?? null,
+                    limiteDiario,
                   );
                   if (problema) return problema;
                   if (await crearSubtarea(evento.id, t))
@@ -2783,69 +2772,46 @@ function ConfirmDialog({
   );
 }
 
+type ConflictoDialogo =
+  | { tipo: "capacidad"; datos: ConflictoSobrecarga }
+  | { tipo: "presupuesto"; totalEvento: number; presupuesto: number };
+
 function ReprogramarDialog({
   evento,
   tarea,
   onClose,
-  onSave,
 }: {
   evento: Evento;
   tarea: Subtarea;
   onClose: () => void;
-  onSave: (
-    fecha: string,
-    hora: string,
-    estimacion: number,
-  ) => void | Promise<unknown>;
 }) {
-  const { eventos } = useStore();
+  const { reprogramarSubtarea, resolverConflictoSubtarea } = useStore();
   const { usuario } = useAuth();
   const [fecha, setFecha] = useState(tarea.fechaLimite);
   const [hora, setHora] = useState(tarea.horaLimite);
   const [estimacion, setEstimacion] = useState(String(tarea.estimacion));
   const [error, setError] = useState("");
-  const [conflicto, setConflicto] = useState<{ fecha: string } | null>(null);
-  const [limite] = useState(() => leerLimiteDiario(usuario?.id ?? null));
-  const presupuestoEvento = leerPresupuestoEvento(evento, usuario?.id ?? null);
-  const conflictoRef = useRef<HTMLDivElement>(null);
-  const horasParaFecha = (fechaObjetivo: string, horasMovidas: number) =>
-    sumarHorasAbiertas(
-      eventos,
-      fechaObjetivo,
-      { eventoId: evento.id, tareaId: tarea.id },
-      tarea.estado === "hecho" ? 0 : horasMovidas,
-    );
-  const estimacionNumerica = Number(estimacion);
-  const horasDelDia = conflicto
-    ? horasParaFecha(conflicto.fecha, estimacionNumerica)
-    : 0;
-  const horasEvento = Number(
-    (totalHorasEvento(evento) - tarea.estimacion + estimacionNumerica).toFixed(
-      2,
-    ),
+  const [guardando, setGuardando] = useState(false);
+  const [conflicto, setConflicto] = useState<ConflictoDialogo | null>(null);
+  const [avisoPersistencia, setAvisoPersistencia] = useState("");
+  const [estimacionConflicto, setEstimacionConflicto] = useState<number | null>(
+    null,
   );
-  const problemasCapacidad = (fechaPropuesta: string, horas: number) => {
-    const diaria = horasParaFecha(fechaPropuesta, horas);
+  const conflictoRef = useRef<HTMLDivElement>(null);
+  const presupuestoEvento = leerPresupuestoEvento(evento, usuario?.id ?? null);
+  const estimacionNumerica = Number(estimacion);
+
+  // Guardia secundario local: el presupuesto de trabajo del evento.
+  const excesoPresupuesto = (horas: number) => {
     const totalEvento = Number(
       (totalHorasEvento(evento) - tarea.estimacion + horas).toFixed(2),
     );
-    const problemas: string[] = [];
-    if (!puedeGuardarPresupuestoEvento(usuario?.id ?? null)) {
-      problemas.push(
-        "Este navegador no permite validar ni guardar el presupuesto local del evento. Habilita el almacenamiento local e inténtalo de nuevo.",
-      );
-    }
-    if (diaria > limite)
-      problemas.push(
-        `Capacidad diaria: ${formatoHoras(diaria)} h / ${limite} h (exceso ${formatoHoras(diaria - limite)} h).`,
-      );
-    if (totalEvento > presupuestoEvento)
-      problemas.push(
-        `Presupuesto total del evento: ${formatoHoras(totalEvento)} h / ${formatoHoras(presupuestoEvento)} h (exceso ${formatoHoras(totalEvento - presupuestoEvento)} h).`,
-      );
-    return problemas;
+    return totalEvento > presupuestoEvento
+      ? { totalEvento, presupuesto: presupuestoEvento }
+      : null;
   };
-  const guardarReprogramacion = (fechaPropuesta: string, horas: number) => {
+
+  const intentarGuardar = async (fechaPropuesta: string, horas: number) => {
     const problema = validarTarea({
       ...tarea,
       fechaLimite: fechaPropuesta,
@@ -2856,14 +2822,134 @@ function ReprogramarDialog({
       setError(Object.values(problema).join(" "));
       return;
     }
-    const capacidad = problemasCapacidad(fechaPropuesta, horas);
-    if (capacidad.length) {
-      setError(capacidad.join(" "));
-      setConflicto({ fecha: fechaPropuesta });
+    if (!puedeGuardarPresupuestoEvento(usuario?.id ?? null)) {
+      setError(
+        "Este navegador no permite validar ni guardar el presupuesto local del evento. Habilita el almacenamiento local e inténtalo de nuevo.",
+      );
       return;
     }
+    const presupuestoExcedido = excesoPresupuesto(horas);
+    if (presupuestoExcedido) {
+      setError("");
+      setAvisoPersistencia("");
+      setConflicto({ tipo: "presupuesto", ...presupuestoExcedido });
+      return;
+    }
+    setGuardando(true);
     setError("");
-    void onSave(fechaPropuesta, hora, horas);
+    const res = await reprogramarSubtarea(tarea.id, {
+      fechaLimite: fechaPropuesta,
+      horaLimite: hora,
+      estimacion: horas,
+    });
+    setGuardando(false);
+    if (res.ok) {
+      onClose();
+      return;
+    }
+    if (res.tipo === "conflicto") {
+      setAvisoPersistencia("");
+      setEstimacionConflicto(horas);
+      setConflicto({ tipo: "capacidad", datos: res.conflicto });
+      return;
+    }
+    setError(res.error);
+  };
+
+  const confirmar = (e: FormEvent) => {
+    e.preventDefault();
+    if (!Number.isFinite(estimacionNumerica) || estimacionNumerica <= 0) {
+      setError("La estimación debe ser mayor que 0 horas.");
+      return;
+    }
+    void intentarGuardar(fecha, estimacionNumerica);
+  };
+
+  const cerrarConflicto = () => {
+    setConflicto(null);
+    setAvisoPersistencia("");
+  };
+
+  const moverAFechaSugerida = async (fechaSugerida: string) => {
+    setGuardando(true);
+    setError("");
+    const res = await resolverConflictoSubtarea(tarea.id, "mover_otro_dia", {
+      plazo: fechaSugerida,
+      horaLimite: hora,
+    });
+    setGuardando(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    if (res.data.resuelto) {
+      onClose();
+      return;
+    }
+    setFecha(fechaSugerida);
+    setEstimacionConflicto(estimacionNumerica);
+    setAvisoPersistencia(
+      `El cambio se guardó, pero ese día sigue sobrecargado: quedan ${formatoHoras(res.data.horasExceso)} h por encima de tu límite.`,
+    );
+    setConflicto({
+      tipo: "capacidad",
+      datos: {
+        fecha: fechaSugerida,
+        limiteHoras: res.data.limiteHoras,
+        horasActuales: 0,
+        horasNuevaGestion: estimacionNumerica,
+        horasTotalesProyectadas: res.data.horasTotalesProyectadas,
+        horasExceso: res.data.horasExceso,
+        estrategiasDisponibles: ["mover_otro_dia", "reducir_horas"],
+        fechasSugeridas: res.data.fechasSugeridas,
+        mensaje: res.data.mensaje,
+      },
+    });
+  };
+
+  const aplicarReduccion = async () => {
+    if (!Number.isFinite(estimacionNumerica) || estimacionNumerica <= 0) {
+      setError("La estimación debe ser mayor que 0 horas.");
+      return;
+    }
+    const presupuestoExcedido = excesoPresupuesto(estimacionNumerica);
+    if (presupuestoExcedido) {
+      setAvisoPersistencia("");
+      setConflicto({ tipo: "presupuesto", ...presupuestoExcedido });
+      return;
+    }
+    setGuardando(true);
+    setError("");
+    const res = await resolverConflictoSubtarea(tarea.id, "reducir_horas", {
+      estimacion: estimacionNumerica,
+    });
+    setGuardando(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    if (res.data.resuelto) {
+      onClose();
+      return;
+    }
+    setEstimacionConflicto(estimacionNumerica);
+    setAvisoPersistencia(
+      `Las horas se guardaron, pero el día sigue sobrecargado: quedan ${formatoHoras(res.data.horasExceso)} h por encima de tu límite.`,
+    );
+    setConflicto({
+      tipo: "capacidad",
+      datos: {
+        fecha,
+        limiteHoras: res.data.limiteHoras,
+        horasActuales: 0,
+        horasNuevaGestion: estimacionNumerica,
+        horasTotalesProyectadas: res.data.horasTotalesProyectadas,
+        horasExceso: res.data.horasExceso,
+        estrategiasDisponibles: ["mover_otro_dia", "reducir_horas"],
+        fechasSugeridas: res.data.fechasSugeridas,
+        mensaje: res.data.mensaje,
+      },
+    });
   };
 
   useEffect(() => {
@@ -2877,6 +2963,7 @@ function ReprogramarDialog({
       if (event.key === "Escape") {
         event.preventDefault();
         setConflicto(null);
+        setAvisoPersistencia("");
       }
     };
     window.addEventListener("keydown", handleEscape);
@@ -2886,54 +2973,6 @@ function ReprogramarDialog({
     };
   }, [Boolean(conflicto)]);
 
-  let fechaSugerida = "";
-  if (
-    conflicto &&
-    (tarea.estado === "hecho" || estimacionNumerica <= limite) &&
-    horasEvento <= presupuestoEvento
-  ) {
-    for (let dias = 1; dias <= 365; dias += 1) {
-      let fechaCandidata = "";
-      try {
-        fechaCandidata = sumarDias(conflicto.fecha, dias);
-      } catch {
-        break;
-      }
-      if (
-        !fechaCandidata ||
-        !Number.isFinite(Date.parse(`${fechaCandidata}T12:00:00`))
-      )
-        break;
-      if (problemasCapacidad(fechaCandidata, estimacionNumerica).length === 0) {
-        fechaSugerida = fechaCandidata;
-        break;
-      }
-    }
-  }
-
-  const confirmar = (e: FormEvent) => {
-    e.preventDefault();
-    if (!Number.isFinite(estimacionNumerica) || estimacionNumerica <= 0) {
-      setError("La estimación debe ser mayor que 0 horas.");
-      return;
-    }
-    const problema = validarTarea({
-      ...tarea,
-      fechaLimite: fecha,
-      horaLimite: hora,
-      estimacion: estimacionNumerica,
-    });
-    if (Object.keys(problema).length > 0) {
-      setError(Object.values(problema).join(" "));
-      return;
-    }
-    setError("");
-    if (problemasCapacidad(fecha, estimacionNumerica).length) {
-      setConflicto({ fecha });
-      return;
-    }
-    guardarReprogramacion(fecha, estimacionNumerica);
-  };
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
       <form
@@ -2957,6 +2996,7 @@ function ReprogramarDialog({
                 onChange={(e) => {
                   setFecha(e.target.value);
                   setConflicto(null);
+                  setAvisoPersistencia("");
                 }}
               />
             </div>
@@ -2983,11 +3023,17 @@ function ReprogramarDialog({
                 onChange={(e) => {
                   setEstimacion(e.target.value);
                   setConflicto(null);
+                  setAvisoPersistencia("");
                 }}
               />
               <span>horas</span>
             </div>
           </div>
+          {avisoPersistencia && (
+            <div className="warning-box" role="status">
+              {avisoPersistencia}
+            </div>
+          )}
           {error && <div className="error-box">{error}</div>}
         </div>
         <div className="form-actions">
@@ -2998,8 +3044,12 @@ function ReprogramarDialog({
           >
             Cancelar
           </button>
-          <button type="submit" className="button button-primary">
-            Confirmar
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={guardando}
+          >
+            {guardando ? "Guardando…" : "Confirmar"}
           </button>
         </div>
       </form>
@@ -3019,119 +3069,214 @@ function ReprogramarDialog({
             tabIndex={-1}
             data-testid="capacity-conflict-dialog"
           >
-            <div className="capacity-conflict-heading">
-              <div>
-                <div className="eyebrow">CAPACIDAD Y PRESUPUESTO</div>
-                <h2 id="capacity-conflict-title">
-                  La reprogramación supera un límite de trabajo
-                </h2>
-              </div>
-              <button
-                type="button"
-                className="button button-ghost button-small"
-                onClick={() => setConflicto(null)}
-                aria-label="Cerrar aviso de capacidad"
-                data-testid="close-capacity-conflict"
-              >
-                Cerrar
-              </button>
-            </div>
-            <p id="capacity-conflict-description" aria-live="polite">
-              Para el {fechaHoraBonita(conflicto.fecha)} quedarían{" "}
-              <strong>{formatoHoras(horasDelDia)} h de trabajo abierto</strong>{" "}
-              frente al límite diario de <strong>{limite} h</strong>
-              {horasDelDia > limite &&
-                ` (exceso de ${formatoHoras(horasDelDia - limite)} h).`}{" "}
-              El evento quedaría en{" "}
-              <strong>
-                {formatoHoras(horasEvento)} h de{" "}
-                {formatoHoras(presupuestoEvento)} h de presupuesto total
-              </strong>
-              {horasEvento > presupuestoEvento &&
-                ` (exceso de ${formatoHoras(horasEvento - presupuestoEvento)} h).`}
-            </p>
-            {error && (
-              <div className="error-box" role="alert">
-                {error}
-              </div>
-            )}
-            <div className="capacity-conflict-options">
-              {fechaSugerida ? (
-                <div className="capacity-conflict-option">
+            {conflicto.tipo === "capacidad" ? (
+              <>
+                <div className="capacity-conflict-heading">
                   <div>
-                    <strong>Mover a un día con capacidad</strong>
-                    <span>
-                      {fechaHoraBonita(fechaSugerida)} ·{" "}
-                      {formatoHoras(
-                        horasParaFecha(fechaSugerida, estimacionNumerica),
-                      )}{" "}
-                      h de {limite} h
-                    </span>
+                    <div className="eyebrow">CAPACIDAD DIARIA</div>
+                    <h2 id="capacity-conflict-title">
+                      La reprogramación supera tu límite diario
+                    </h2>
                   </div>
                   <button
                     type="button"
-                    className="button button-secondary button-small"
-                    onClick={() =>
-                      guardarReprogramacion(fechaSugerida, estimacionNumerica)
-                    }
-                    data-testid="use-suggested-reschedule-date"
+                    className="button button-ghost button-small"
+                    onClick={cerrarConflicto}
+                    aria-label="Cerrar aviso de capacidad"
+                    data-testid="close-capacity-conflict"
                   >
-                    Usar fecha sugerida
+                    Cerrar
                   </button>
                 </div>
-              ) : (
-                <p>
-                  No se encontró una fecha posterior disponible dentro de los
-                  próximos 365 días que respete ambos límites.
+                <p id="capacity-conflict-description" aria-live="polite">
+                  Para el {fechaHoraBonita(conflicto.datos.fecha)} quedarías con{" "}
+                  <strong>
+                    {formatoHoras(conflicto.datos.horasTotalesProyectadas)} h
+                    planificadas
+                  </strong>{" "}
+                  (límite {formatoHoras(conflicto.datos.limiteHoras)} h)
+                  {conflicto.datos.horasExceso > 0 &&
+                    `, un exceso de ${formatoHoras(conflicto.datos.horasExceso)} h`}
+                  .
+                  {conflicto.datos.horasActuales > 0 &&
+                    ` Otras gestiones abiertas de ese día suman ${formatoHoras(conflicto.datos.horasActuales)} h.`}
                 </p>
-              )}
-              <div className="capacity-conflict-option">
-                <div>
-                  <strong>Reducir la estimación</strong>
-                  <span>El total se actualiza al cambiar las horas.</span>
+                {avisoPersistencia && (
+                  <div className="warning-box" role="status">
+                    {avisoPersistencia}
+                  </div>
+                )}
+                {error && (
+                  <div className="error-box" role="alert">
+                    {error}
+                  </div>
+                )}
+                <div className="capacity-conflict-options">
+                  {conflicto.datos.fechasSugeridas.length ? (
+                    conflicto.datos.fechasSugeridas.map((sugerida) => (
+                      <div
+                        className="capacity-conflict-option"
+                        key={sugerida.fecha}
+                      >
+                        <div>
+                          <strong>Mover a un día con capacidad</strong>
+                          <span>
+                            {fechaHoraBonita(sugerida.fecha)} ·{" "}
+                            {formatoHoras(sugerida.horasTotalesProyectadas)} h de{" "}
+                            {formatoHoras(conflicto.datos.limiteHoras)} h
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="button button-secondary button-small"
+                          onClick={() => void moverAFechaSugerida(sugerida.fecha)}
+                          disabled={guardando}
+                          data-testid={`use-suggested-reschedule-date-${sugerida.fecha}`}
+                        >
+                          Usar esta fecha
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p>
+                      No encontramos un día libre en los próximos 90 días. Elige
+                      otra fecha manualmente.
+                    </p>
+                  )}
+                  <div className="capacity-conflict-option">
+                    <div>
+                      <strong>Reducir la estimación</strong>
+                      <span>El total se actualiza al cambiar las horas.</span>
+                    </div>
+                    <div className="capacity-conflict-reduce">
+                      <label htmlFor="reprogramar-estimacion-conflicto">
+                        Nueva estimación
+                      </label>
+                      <input
+                        id="reprogramar-estimacion-conflicto"
+                        data-testid="reprogramar-estimacion-conflicto"
+                        type="number"
+                        min="0.25"
+                        step="0.25"
+                        value={estimacion}
+                        onChange={(e) => setEstimacion(e.target.value)}
+                        aria-describedby="capacity-conflict-description"
+                      />
+                      <span>h</span>
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        onClick={() => void aplicarReduccion()}
+                        disabled={
+                          guardando ||
+                          !Number.isFinite(estimacionNumerica) ||
+                          estimacionNumerica <= 0 ||
+                          estimacionNumerica === estimacionConflicto
+                        }
+                        data-testid="apply-reduced-estimation"
+                      >
+                        Aplicar horas
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="capacity-conflict-reduce">
-                  <label htmlFor="reprogramar-estimacion-conflicto">
-                    Nueva estimación
-                  </label>
-                  <input
-                    id="reprogramar-estimacion-conflicto"
-                    data-testid="reprogramar-estimacion-conflicto"
-                    type="number"
-                    min="0.25"
-                    step="0.25"
-                    value={estimacion}
-                    onChange={(e) => setEstimacion(e.target.value)}
-                    aria-describedby="capacity-conflict-description"
-                  />
-                  <span>h</span>
+                <div className="capacity-conflict-actions">
                   <button
                     type="button"
-                    className="button button-secondary button-small"
-                    onClick={() =>
-                      guardarReprogramacion(fecha, estimacionNumerica)
-                    }
-                    disabled={
-                      !Number.isFinite(estimacionNumerica) ||
-                      estimacionNumerica <= 0 ||
-                      problemasCapacidad(fecha, estimacionNumerica).length > 0
-                    }
-                    data-testid="apply-reduced-estimation"
+                    className="button button-ghost button-small"
+                    onClick={cerrarConflicto}
                   >
-                    Aplicar horas
+                    Revisar fecha
                   </button>
                 </div>
-              </div>
-            </div>
-            <div className="capacity-conflict-actions">
-              <button
-                type="button"
-                className="button button-ghost button-small"
-                onClick={() => setConflicto(null)}
-              >
-                Revisar fecha
-              </button>
-            </div>
+              </>
+            ) : (
+              <>
+                <div className="capacity-conflict-heading">
+                  <div>
+                    <div className="eyebrow">PRESUPUESTO DEL EVENTO</div>
+                    <h2 id="capacity-conflict-title">
+                      La reprogramación supera el presupuesto del evento
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-ghost button-small"
+                    onClick={cerrarConflicto}
+                    aria-label="Cerrar aviso de presupuesto"
+                    data-testid="close-capacity-conflict"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+                <p id="capacity-conflict-description" aria-live="polite">
+                  El evento quedaría en{" "}
+                  <strong>
+                    {formatoHoras(conflicto.totalEvento)} h planificadas
+                  </strong>{" "}
+                  frente a un presupuesto de{" "}
+                  <strong>{formatoHoras(conflicto.presupuesto)} h</strong> (exceso
+                  de{" "}
+                  {formatoHoras(conflicto.totalEvento - conflicto.presupuesto)} h).
+                </p>
+                {error && (
+                  <div className="error-box" role="alert">
+                    {error}
+                  </div>
+                )}
+                <div className="capacity-conflict-options">
+                  <div className="capacity-conflict-option">
+                    <div>
+                      <strong>Reducir la estimación</strong>
+                      <span>
+                        Ajusta las horas para que el plan del evento quepa en su
+                        presupuesto.
+                      </span>
+                    </div>
+                    <div className="capacity-conflict-reduce">
+                      <label htmlFor="reprogramar-estimacion-conflicto">
+                        Nueva estimación
+                      </label>
+                      <input
+                        id="reprogramar-estimacion-conflicto"
+                        data-testid="reprogramar-estimacion-conflicto"
+                        type="number"
+                        min="0.25"
+                        step="0.25"
+                        value={estimacion}
+                        onChange={(e) => setEstimacion(e.target.value)}
+                        aria-describedby="capacity-conflict-description"
+                      />
+                      <span>h</span>
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        onClick={() =>
+                          void intentarGuardar(fecha, estimacionNumerica)
+                        }
+                        disabled={
+                          guardando ||
+                          !Number.isFinite(estimacionNumerica) ||
+                          estimacionNumerica <= 0
+                        }
+                        data-testid="apply-reduced-estimation"
+                      >
+                        Aplicar horas
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="capacity-conflict-actions">
+                  <button
+                    type="button"
+                    className="button button-ghost button-small"
+                    onClick={cerrarConflicto}
+                  >
+                    Revisar fecha
+                  </button>
+                </div>
+              </>
+            )}
           </section>
         </div>
       )}

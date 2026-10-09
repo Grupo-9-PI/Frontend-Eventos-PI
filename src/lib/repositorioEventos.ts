@@ -1,4 +1,4 @@
-import { api } from "@/services/api";
+import { api, mensajeDeError } from "@/services/api";
 
 export type EstadoSubtarea = "pendiente" | "en_progreso" | "hecho";
 export type Prioridad = "alta" | "media" | "baja";
@@ -13,6 +13,38 @@ export type Subtarea = {
   horaLimite: string;
   horaInicio?: string;
   estimacion: number;
+};
+
+export type FechaSugerida = {
+  fecha: string;
+  horasTotalesProyectadas: number;
+};
+
+export type ConflictoSobrecarga = {
+  fecha: string;
+  limiteHoras: number;
+  horasActuales: number;
+  horasNuevaGestion: number;
+  horasTotalesProyectadas: number;
+  horasExceso: number;
+  estrategiasDisponibles: string[];
+  fechasSugeridas: FechaSugerida[];
+  mensaje: string;
+};
+
+export type ResultadoReprogramacion =
+  | { ok: true; data: Subtarea }
+  | { ok: false; tipo: "conflicto"; conflicto: ConflictoSobrecarga }
+  | { ok: false; tipo: "error"; error: string };
+
+export type RespuestaResolverConflicto = {
+  resuelto: boolean;
+  mensaje: string;
+  subtarea: Subtarea;
+  limiteHoras: number;
+  horasTotalesProyectadas: number;
+  horasExceso: number;
+  fechasSugeridas: FechaSugerida[];
 };
 
 export type Evento = {
@@ -98,6 +130,31 @@ function mapSubtareaFromApi(t: any): Subtarea {
     horaLimite: t.hora_limite.slice(0, 5),
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
+  };
+}
+
+function mapFechaSugeridaFromApi(f: any): FechaSugerida {
+  return {
+    fecha: f.fecha,
+    horasTotalesProyectadas: Number(f.horas_totales_proyectadas),
+  };
+}
+
+function mapConflictoFromApi(c: any): ConflictoSobrecarga {
+  return {
+    fecha: c.fecha,
+    limiteHoras: Number(c.limite_horas),
+    horasActuales: Number(c.horas_actuales),
+    horasNuevaGestion: Number(c.horas_nueva_gestion),
+    horasTotalesProyectadas: Number(c.horas_totales_proyectadas),
+    horasExceso: Number(c.horas_exceso),
+    estrategiasDisponibles: Array.isArray(c.estrategias_disponibles)
+      ? c.estrategias_disponibles
+      : [],
+    fechasSugeridas: Array.isArray(c.fechas_sugeridas)
+      ? c.fechas_sugeridas.map(mapFechaSugeridaFromApi)
+      : [],
+    mensaje: c.mensaje ?? "",
   };
 }
 
@@ -225,12 +282,113 @@ export const repositorioEventos = {
     }
   },
 
+  async reprogramar(
+    id: string,
+    cambios: { fechaLimite: string; horaLimite: string; estimacion: number },
+  ): Promise<ResultadoReprogramacion> {
+    try {
+      const response = await api.patch(`/subtareas/${id}/reprogramar/`, {
+        plazo: cambios.fechaLimite,
+        hora_limite: cambios.horaLimite,
+        estimacion_horas: cambios.estimacion,
+      });
+      return { ok: true, data: mapSubtareaFromApi(response.data) };
+    } catch (e: any) {
+      if (e.response?.status === 409) {
+        return {
+          ok: false,
+          tipo: "conflicto",
+          conflicto: mapConflictoFromApi(e.response.data),
+        };
+      }
+      return {
+        ok: false,
+        tipo: "error",
+        error: e.response?.data
+          ? mensajeDeError(e.response.data)
+          : "No se pudo reprogramar la gestión. Revisa tu conexión e inténtalo de nuevo.",
+      };
+    }
+  },
+
+  async resolverConflicto(
+    id: string,
+    estrategia: "mover_otro_dia" | "reducir_horas",
+    datos: { plazo?: string; horaLimite?: string; estimacion?: number },
+  ): Promise<Resultado<RespuestaResolverConflicto>> {
+    try {
+      const response = await api.post(`/subtareas/${id}/resolver-conflicto/`, {
+        estrategia,
+        plazo: datos.plazo,
+        hora_limite: datos.horaLimite,
+        estimacion_horas: datos.estimacion,
+      });
+      const d = response.data;
+      return {
+        ok: true,
+        data: {
+          resuelto: Boolean(d.resuelto),
+          mensaje: d.mensaje ?? "",
+          subtarea: mapSubtareaFromApi(d.subtarea),
+          limiteHoras: Number(d.limite_horas),
+          horasTotalesProyectadas: Number(d.horas_totales_proyectadas),
+          horasExceso: Number(d.horas_exceso),
+          fechasSugeridas: Array.isArray(d.fechas_sugeridas)
+            ? d.fechas_sugeridas.map(mapFechaSugeridaFromApi)
+            : [],
+        },
+      };
+    } catch (e: any) {
+      return {
+        ok: false,
+        error: e.response?.data
+          ? mensajeDeError(e.response.data)
+          : "No se pudo resolver el conflicto. Revisa tu conexión e inténtalo de nuevo.",
+      };
+    }
+  },
+
   async eliminarSubtarea(id: string): Promise<Resultado<boolean>> {
     try {
       await api.delete(`/subtareas/${id}/`);
       return { ok: true, data: true };
     } catch (e: any) {
       return { ok: false, error: "Error al eliminar gestión." };
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Capacidad diaria del organizador (límite de horas, persistido en el servidor)
+// ---------------------------------------------------------------------------
+
+export const repositorioConfiguracion = {
+  async cargar(): Promise<Resultado<number>> {
+    try {
+      const response = await api.get("/config/");
+      return { ok: true, data: Number(response.data.limite_diario_horas) };
+    } catch (e: any) {
+      console.error(e);
+      return {
+        ok: false,
+        error: "No se pudo cargar tu capacidad diaria desde el servidor.",
+      };
+    }
+  },
+
+  async actualizar(horas: number): Promise<Resultado<number>> {
+    try {
+      const response = await api.put("/config/", {
+        limite_diario_horas: horas,
+      });
+      return { ok: true, data: Number(response.data.limite_diario_horas) };
+    } catch (e: any) {
+      return {
+        ok: false,
+        error: e.response?.data
+          ? mensajeDeError(e.response.data)
+          : "No se pudo guardar tu capacidad diaria. Revisa tu conexión e inténtalo de nuevo.",
+      };
     }
   },
 };
