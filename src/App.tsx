@@ -43,6 +43,7 @@ import {
   hoursToTime,
   timeToHours,
   diferenciaDias,
+  fechaBonita,
   fechaHoraBonita,
   generarId,
   hoyISO,
@@ -546,7 +547,7 @@ function Shell() {
             </button>
           </div>
           <button
-            className="button button-danger"
+            className="button button-primary"
             style={{ width: "100%", justifyContent: "center" }}
             onClick={() => {
               logout();
@@ -616,14 +617,10 @@ function Shell() {
               </div>
             </button>
             <button
+              className="button button-primary button-small"
               onClick={() => {
                 logout();
                 setLocation("/login");
-              }}
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--oxido)",
               }}
             >
               Salir
@@ -878,9 +875,286 @@ function FilaTarea({
   );
 }
 
+const LIMITE_DIARIO_PREDETERMINADO = 6;
+const PRESUPUESTO_EVENTO_PREDETERMINADO = 6;
+
+function claveLimiteDiario(usuarioId: number | null) {
+  return `eventops:limite-diario:${usuarioId ?? "anonimo"}`;
+}
+
+function clavePresupuestoEvento(usuarioId: number | null, eventoId: string) {
+  return `eventops:presupuesto-trabajo:${usuarioId ?? "anonimo"}:${eventoId}`;
+}
+
+function totalHorasEvento(evento: Evento) {
+  return Number(
+    evento.subtareas
+      .reduce((total, tarea) => total + tarea.estimacion, 0)
+      .toFixed(2),
+  );
+}
+
+function leerPresupuestoEvento(evento: Evento, usuarioId: number | null) {
+  const minimoPlanificado = totalHorasEvento(evento);
+  const porDefecto = Math.max(
+    PRESUPUESTO_EVENTO_PREDETERMINADO,
+    minimoPlanificado,
+  );
+  try {
+    const guardado = localStorage.getItem(
+      clavePresupuestoEvento(usuarioId, evento.id),
+    );
+    const numero = Number(guardado);
+    if (guardado !== null && Number.isFinite(numero) && numero > 0)
+      return numero;
+    // Los planes previos al presupuesto reciben un valor local que nunca invalida sus gestiones existentes.
+    localStorage.setItem(
+      clavePresupuestoEvento(usuarioId, evento.id),
+      String(porDefecto),
+    );
+  } catch {
+    // Si el navegador bloquea localStorage, la vista sigue usando un presupuesto seguro derivado del plan.
+  }
+  return porDefecto;
+}
+
+function guardarPresupuestoEvento(
+  usuarioId: number | null,
+  eventoId: string,
+  horas: number,
+) {
+  try {
+    localStorage.setItem(
+      clavePresupuestoEvento(usuarioId, eventoId),
+      String(horas),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function puedeGuardarPresupuestoEvento(usuarioId: number | null) {
+  const clave = `eventops:prueba-almacenamiento:${usuarioId ?? "anonimo"}`;
+  try {
+    const anterior = localStorage.getItem(clave);
+    localStorage.setItem(clave, "ok");
+    if (anterior === null) localStorage.removeItem(clave);
+    else localStorage.setItem(clave, anterior);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function formatoHoras(horas: number) {
+  return Number(horas.toFixed(2)).toLocaleString("es-CO", {
+    maximumFractionDigits: 2,
+  });
+}
+
+function validarCapacidadesTarea(
+  eventos: Evento[],
+  eventoId: string,
+  candidata: Subtarea,
+  usuarioId: number | null,
+  tareaExistenteId?: string,
+) {
+  if (!puedeGuardarPresupuestoEvento(usuarioId)) {
+    return "Este navegador no permite validar ni guardar el presupuesto local del evento. Habilita el almacenamiento local e inténtalo de nuevo.";
+  }
+  const evento = eventos.find((e) => e.id === eventoId);
+  if (!evento) return "No se encontró el evento para validar sus capacidades.";
+  const presupuesto = leerPresupuestoEvento(evento, usuarioId);
+  const totalActual = totalHorasEvento(evento);
+  const anterior = tareaExistenteId
+    ? evento.subtareas.find((t) => t.id === tareaExistenteId)
+    : undefined;
+  const totalEvento = Number(
+    (totalActual - (anterior?.estimacion ?? 0) + candidata.estimacion).toFixed(
+      2,
+    ),
+  );
+  const totalDia = sumarHorasAbiertas(
+    eventos,
+    candidata.fechaLimite,
+    tareaExistenteId ? { eventoId, tareaId: tareaExistenteId } : undefined,
+    candidata.estado === "hecho" ? 0 : candidata.estimacion,
+  );
+  const limiteDiario = leerLimiteDiario(usuarioId);
+  const mensajes: string[] = [];
+  if (totalEvento > presupuesto) {
+    mensajes.push(
+      `El evento quedaría en ${formatoHoras(totalEvento)} h de ${formatoHoras(presupuesto)} h de presupuesto total (exceso ${formatoHoras(totalEvento - presupuesto)} h).`,
+    );
+  }
+  if (totalDia > limiteDiario) {
+    mensajes.push(
+      `El ${fechaBonita(candidata.fechaLimite, true)} quedaría en ${formatoHoras(totalDia)} h de ${limiteDiario} h de capacidad diaria (exceso ${formatoHoras(totalDia - limiteDiario)} h).`,
+    );
+  }
+  return mensajes.length ? mensajes.join(" ") : "";
+}
+
+function leerLimiteDiario(usuarioId: number | null) {
+  try {
+    const valor = localStorage.getItem(claveLimiteDiario(usuarioId));
+    const horas = Number(valor);
+    if (valor && Number.isInteger(horas) && horas >= 1 && horas <= 16)
+      return horas;
+  } catch {
+    // El límite predeterminado permite usar la pantalla si el navegador bloquea el almacenamiento.
+  }
+  return LIMITE_DIARIO_PREDETERMINADO;
+}
+
+function sumarHorasAbiertas(
+  eventos: Evento[],
+  fecha: string,
+  excluir?: { eventoId: string; tareaId: string },
+  horasDeTareaMovida = 0,
+) {
+  const otrasHoras = eventos.reduce(
+    (sumaEventos, evento) =>
+      sumaEventos +
+      evento.subtareas.reduce((sumaTareas, tarea) => {
+        if (
+          tarea.estado === "hecho" ||
+          tarea.fechaLimite !== fecha ||
+          (excluir?.eventoId === evento.id && excluir.tareaId === tarea.id)
+        )
+          return sumaTareas;
+        return sumaTareas + tarea.estimacion;
+      }, 0),
+    0,
+  );
+  return Number((otrasHoras + horasDeTareaMovida).toFixed(2));
+}
+
+function CapacidadDiariaHoy({
+  eventos,
+  fecha,
+  usuarioId,
+}: {
+  eventos: Evento[];
+  fecha: string;
+  usuarioId: number | null;
+}) {
+  const [limite, setLimite] = useState(() => leerLimiteDiario(usuarioId));
+  const [borrador, setBorrador] = useState(String(limite));
+  const [error, setError] = useState("");
+  const [guardado, setGuardado] = useState(false);
+  const carga = sumarHorasAbiertas(eventos, fecha);
+
+  const guardarLimite = (event: FormEvent) => {
+    event.preventDefault();
+    if (
+      !/^\d+$/.test(borrador) ||
+      Number(borrador) < 1 ||
+      Number(borrador) > 16
+    ) {
+      setError("El límite debe ser un número entero entre 1 y 16 horas.");
+      setGuardado(false);
+      return;
+    }
+    try {
+      const nuevoLimite = Number(borrador);
+      localStorage.setItem(claveLimiteDiario(usuarioId), String(nuevoLimite));
+      setLimite(nuevoLimite);
+      setBorrador(String(nuevoLimite));
+      setError("");
+      setGuardado(true);
+    } catch {
+      setError("No se pudo guardar el límite en este navegador.");
+      setGuardado(false);
+    }
+  };
+
+  return (
+    <section
+      className="daily-capacity-card card"
+      aria-labelledby="daily-capacity-title"
+    >
+      <div className="daily-capacity-copy">
+        <div className="eyebrow">CAPACIDAD DEL ORGANIZADOR</div>
+        <h2 id="daily-capacity-title">Límite de trabajo diario</h2>
+        <p>
+          Define cuántas horas de gestiones abiertas quieres planificar por día.
+        </p>
+        <div
+          className={`daily-capacity-total${carga > limite ? " over" : ""}`}
+          data-testid="daily-capacity-total"
+          aria-live="polite"
+        >
+          <strong>{carga} h</strong> planificadas hoy de{" "}
+          <strong>{limite} h</strong>
+          {carga > limite && (
+            <span>Se supera el límite por {carga - limite} h.</span>
+          )}
+        </div>
+      </div>
+      <form className="daily-capacity-form" onSubmit={guardarLimite} noValidate>
+        <div className="field">
+          <label htmlFor="daily-capacity-input">Horas máximas por día</label>
+          <div className="daily-capacity-input">
+            <input
+              id="daily-capacity-input"
+              data-testid="daily-capacity-input"
+              type="number"
+              min={1}
+              max={16}
+              step={1}
+              value={borrador}
+              aria-invalid={Boolean(error)}
+              aria-describedby={
+                error ? "daily-capacity-error" : "daily-capacity-help"
+              }
+              onChange={(event) => {
+                setBorrador(event.target.value);
+                setGuardado(false);
+                if (error) setError("");
+              }}
+            />
+            <span>horas</span>
+          </div>
+          <small id="daily-capacity-help">
+            Número entero de 1 a 16. Solo se guarda en este navegador para tu
+            usuario.
+          </small>
+          {error && (
+            <div
+              id="daily-capacity-error"
+              className="field-error"
+              role="alert"
+              data-testid="daily-capacity-error"
+            >
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="daily-capacity-actions">
+          <button
+            className="button button-secondary button-small"
+            type="submit"
+            data-testid="save-daily-capacity"
+          >
+            Guardar límite
+          </button>
+          {guardado && (
+            <span role="status" className="daily-capacity-saved">
+              Límite guardado
+            </span>
+          )}
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function Hoy() {
   const { eventos, hoy, errorCarga, refrescar, actualizarSubtarea } =
     useStore();
+  const { usuario } = useAuth();
   const [reprogramar, setReprogramar] = useState<{
     evento: Evento;
     tarea: Subtarea;
@@ -905,15 +1179,17 @@ function Hoy() {
     tareaId: string,
     fecha: string,
     hora: string,
+    estimacion: number,
   ) => {
     const evento = eventos.find((e) => e.id === eventoId);
     if (!evento) return;
     const tarea = evento.subtareas.find((t) => t.id === tareaId);
     if (!tarea) return;
-    const problema = validarTarea(evento, {
+    const problema = validarTarea({
       ...tarea,
       fechaLimite: fecha,
       horaLimite: hora,
+      estimacion,
     });
     const mensajes = Object.values(problema);
     if (mensajes.length > 0) {
@@ -925,6 +1201,7 @@ function Hoy() {
         ...tarea,
         fechaLimite: fecha,
         horaLimite: hora,
+        estimacion,
       })
     )
       setReprogramar(null);
@@ -1002,6 +1279,12 @@ function Hoy() {
           </Link>
         }
       />
+      <CapacidadDiariaHoy
+        key={usuario?.id ?? "anonimo"}
+        eventos={eventos}
+        fecha={hoyISO()}
+        usuarioId={usuario?.id ?? null}
+      />
       {eventos.length === 0 ? (
         <EmptyState
           titulo="Todavía no hay eventos"
@@ -1034,8 +1317,14 @@ function Hoy() {
           evento={reprogramar.evento}
           tarea={reprogramar.tarea}
           onClose={() => setReprogramar(null)}
-          onSave={(fecha, hora) =>
-            moverTarea(reprogramar.evento.id, reprogramar.tarea.id, fecha, hora)
+          onSave={(fecha, hora, estimacion) =>
+            moverTarea(
+              reprogramar.evento.id,
+              reprogramar.tarea.id,
+              fecha,
+              hora,
+              estimacion,
+            )
           }
         />
       )}
@@ -1173,6 +1462,7 @@ type FormEvento = {
   fechaFin: string;
   horaEvento: string;
   duracion: string;
+  presupuestoTrabajo: string;
   lugar: string;
   notas: string;
 };
@@ -1193,6 +1483,7 @@ const formEventoInicial = (): FormEvento => ({
   fechaFin: sumarDias(hoyISO(), 14),
   horaEvento: "19:00",
   duracion: "04:00",
+  presupuestoTrabajo: "",
   lugar: "",
   notas: "",
 });
@@ -1208,7 +1499,8 @@ const borradorInicial = (): BorradorTarea => ({
 });
 function CrearEvento() {
   const [mostrarPlan, setMostrarPlan] = useState(false);
-  const { crearEventoCompleto } = useStore();
+  const { crearEventoCompleto, eventos } = useStore();
+  const { usuario } = useAuth();
   const [, setLocation] = useLocation();
   const [datos, setDatos] = useState<FormEvento>(formEventoInicial);
   const [tareas, setTareas] = useState<BorradorTarea[]>([]);
@@ -1334,6 +1626,45 @@ function CrearEvento() {
     }
 
     const validacion = validarDatosEvento(datos, tareas, mostrarPlan);
+    const presupuesto = Number(datos.presupuestoTrabajo);
+    if (!Number.isFinite(presupuesto) || presupuesto <= 0) {
+      validacion.presupuestoTrabajo =
+        "Indica un presupuesto de trabajo mayor que 0 horas.";
+    }
+    if (mostrarPlan && tareas.length) {
+      const totalPlan = tareas.reduce(
+        (suma, t) => suma + timeToHours(t.estimacion),
+        0,
+      );
+      if (totalPlan > presupuesto) {
+        validacion.general = `El plan inicial suma ${formatoHoras(totalPlan)} h y el presupuesto del evento es ${formatoHoras(presupuesto)} h; excede por ${formatoHoras(totalPlan - presupuesto)} h.`;
+      }
+      const porFecha = tareas.reduce<Record<string, number>>((acum, tarea) => {
+        acum[tarea.fechaLimite] =
+          (acum[tarea.fechaLimite] ?? 0) + timeToHours(tarea.estimacion);
+        return acum;
+      }, {});
+      const limiteDiario = leerLimiteDiario(usuario?.id ?? null);
+      const conflictosDia = Object.entries(porFecha)
+        .map(([fecha, horas]) => ({
+          fecha,
+          horas: sumarHorasAbiertas(eventos, fecha) + horas,
+        }))
+        .filter((dia) => dia.horas > limiteDiario);
+      if (conflictosDia.length) {
+        const detalle = conflictosDia
+          .map(
+            (dia) =>
+              `${fechaBonita(dia.fecha, true)}: ${formatoHoras(dia.horas)} h / ${limiteDiario} h (exceso ${formatoHoras(dia.horas - limiteDiario)} h)`,
+          )
+          .join("; ");
+        validacion.general = `${validacion.general ? `${validacion.general} ` : ""}El plan también supera la capacidad diaria: ${detalle}.`;
+      }
+    }
+    if (!puedeGuardarPresupuestoEvento(usuario?.id ?? null)) {
+      validacion.presupuestoTrabajo =
+        "Este navegador no permite guardar el presupuesto local. Habilita el almacenamiento local antes de crear el evento.";
+    }
 
     if (mostrarPlan && !tareas.length && Object.keys(errorNuevo).length === 0) {
       setErrorNuevo({ titulo: "Obligatorio", estimacion: "Obligatorio" });
@@ -1355,6 +1686,7 @@ function CrearEvento() {
       fechaFin: datos.fechaFin,
       horaEvento: datos.horaEvento,
       duracion: timeToHours(datos.duracion),
+      // presupuestoTrabajo vive solo en el almacenamiento local; nunca se manda al API ni se confunde con duración.
       lugar: datos.lugar.trim(),
       notas: datos.notas.trim(),
       capacidadDiaria: 24,
@@ -1370,7 +1702,17 @@ function CrearEvento() {
       estimacion: timeToHours(t.estimacion),
     }));
     const id = await crearEventoCompleto(eventoPayload, tareasPayload);
-    if (id) setLocation("/evento/" + id);
+    if (id) {
+      const guardado = guardarPresupuestoEvento(
+        usuario?.id ?? null,
+        id,
+        Number(datos.presupuestoTrabajo),
+      );
+      if (!guardado) {
+        // La API ya guardó el evento. Si el almacenamiento local está bloqueado, se informa desde el detalle mediante su valor derivado.
+      }
+      setLocation("/evento/" + id);
+    }
   };
 
   return (
@@ -1507,6 +1849,36 @@ function CrearEvento() {
                 onChange={(e) => setCampo("duracion", e.target.value)}
                 aria-label="Duración del evento en horas y minutos"
               />
+            </div>
+            <div className="field">
+              <label htmlFor="presupuesto-trabajo-evento">
+                Presupuesto de trabajo <span className="req">*</span>
+              </label>
+              {error.presupuestoTrabajo && (
+                <div className="field-error" role="alert">
+                  {error.presupuestoTrabajo}
+                </div>
+              )}
+              <div className="daily-capacity-input">
+                <input
+                  id="presupuesto-trabajo-evento"
+                  data-testid="event-work-budget-input"
+                  type="number"
+                  min="0.25"
+                  step="0.25"
+                  value={datos.presupuestoTrabajo}
+                  aria-invalid={Boolean(error.presupuestoTrabajo)}
+                  onChange={(e) =>
+                    setCampo("presupuestoTrabajo", e.target.value)
+                  }
+                />
+                <span>horas de gestiones</span>
+              </div>
+              <small className="field-hint">
+                Esfuerzo total permitido para todas las gestiones, incluidas las
+                completadas. No es la duración real del evento; se guarda solo
+                en este navegador.
+              </small>
             </div>
             <div className="field full">
               <label>Notas</label>
@@ -1663,9 +2035,8 @@ function CrearEvento() {
                       <label>Plazo</label>
                       <input
                         type="date"
+                        data-testid="initial-plan-deadline"
                         value={t.fechaLimite}
-                        min={datos.fechaInicio}
-                        max={datos.fechaFin}
                         onChange={(e) =>
                           setTareas((ts) =>
                             ts.map((x) =>
@@ -1747,12 +2118,14 @@ function CrearEvento() {
                     <input
                       type="date"
                       value={nuevo.fechaLimite}
-                      min={datos.fechaInicio}
-                      max={datos.fechaFin}
                       onChange={(e) =>
                         setNuevo({ ...nuevo, fechaLimite: e.target.value })
                       }
                     />
+                    <small className="field-hint">
+                      La fecha organiza el trabajo de la gestión y puede ser
+                      distinta de las fechas reales del evento.
+                    </small>
                   </div>
                   <div className="field">
                     <label>Hora</label>
@@ -1807,6 +2180,12 @@ function validarDatosEvento(
   } else if (datos.fechaFin < datos.fechaInicio) e.fechaFin = "Inválida.";
   if (timeToHours(datos.duracion) <= 0)
     e.duracion = "Indica una duración mayor a 0.";
+  if (
+    !Number.isFinite(Number(datos.presupuestoTrabajo)) ||
+    Number(datos.presupuestoTrabajo) <= 0
+  )
+    e.presupuestoTrabajo =
+      "Indica un presupuesto de trabajo mayor que 0 horas.";
 
   if (!datos.horaEvento) e.horaEvento = "Obligatoria.";
   if (mostrarPlan && !tareas.length)
@@ -1815,19 +2194,133 @@ function validarDatosEvento(
   return e;
 }
 
-function validarTarea(evento: Evento, candidata: Subtarea) {
+function validarTarea(candidata: Subtarea) {
   const e: Record<string, string> = {};
   if (!candidata.titulo.trim()) e.titulo = "El título es obligatorio.";
   if (!candidata.fechaLimite) e.fechaLimite = "Elige fecha.";
   if (!candidata.horaLimite) e.horaLimite = "Elige hora.";
   if (candidata.estimacion <= 0) e.estimacion = "Mayor que 0.";
-  if (
-    candidata.fechaLimite &&
-    (candidata.fechaLimite < evento.fechaInicio ||
-      candidata.fechaLimite > evento.fechaFin)
-  )
-    e.fechaLimite = "El plazo debe estar entre el inicio y el fin del evento.";
+  // El plazo organiza trabajo logístico; puede estar antes o después de las fechas reales del evento.
   return e;
+}
+
+function PresupuestoEvento({
+  evento,
+  usuarioId,
+}: {
+  evento: Evento;
+  usuarioId: number | null;
+}) {
+  const actual = leerPresupuestoEvento(evento, usuarioId);
+  const [borrador, setBorrador] = useState(String(actual));
+  const [presupuesto, setPresupuesto] = useState(actual);
+  const [error, setError] = useState("");
+  const [guardado, setGuardado] = useState(false);
+  const total = totalHorasEvento(evento);
+  const guardar = (event: FormEvent) => {
+    event.preventDefault();
+    const nuevo = Number(borrador);
+    if (!Number.isFinite(nuevo) || nuevo <= 0) {
+      setError("El presupuesto debe ser mayor que 0 horas.");
+      return;
+    }
+    if (nuevo < total) {
+      setError(
+        `El evento ya suma ${formatoHoras(total)} h en sus gestiones (incluidas las completadas). El presupuesto mínimo es ${formatoHoras(total)} h.`,
+      );
+      return;
+    }
+    if (!guardarPresupuestoEvento(usuarioId, evento.id, nuevo)) {
+      setError("No se pudo guardar el presupuesto en este navegador.");
+      return;
+    }
+    setPresupuesto(nuevo);
+    setBorrador(String(nuevo));
+    setError("");
+    setGuardado(true);
+  };
+  return (
+    <section
+      className="daily-capacity-card card"
+      aria-labelledby="event-work-budget-title"
+      data-testid="event-work-budget-panel"
+    >
+      <div className="daily-capacity-copy">
+        <div className="eyebrow">PRESUPUESTO LOCAL DEL EVENTO</div>
+        <h2 id="event-work-budget-title">Horas de trabajo planificadas</h2>
+        <p>
+          Cuenta todas las gestiones del evento, incluidas las completadas. Es
+          independiente de la duración real del evento. Este valor solo se
+          guarda en este navegador.
+        </p>
+        <div
+          className={`daily-capacity-total${total > presupuesto ? " over" : ""}`}
+          data-testid="event-work-budget-total"
+          aria-live="polite"
+        >
+          <strong>{formatoHoras(total)} h</strong> de{" "}
+          <strong>{formatoHoras(presupuesto)} h</strong>
+          {total > presupuesto && (
+            <span>Exceso de {formatoHoras(total - presupuesto)} h.</span>
+          )}
+        </div>
+      </div>
+      <form className="daily-capacity-form" onSubmit={guardar} noValidate>
+        <div className="field">
+          <label htmlFor="event-work-budget-edit">
+            Presupuesto total de trabajo
+          </label>
+          <div className="daily-capacity-input">
+            <input
+              id="event-work-budget-edit"
+              data-testid="event-work-budget-edit"
+              type="number"
+              min="0.25"
+              step="0.25"
+              value={borrador}
+              aria-invalid={Boolean(error)}
+              aria-describedby={
+                error ? "event-work-budget-error" : "event-work-budget-help"
+              }
+              onChange={(event) => {
+                setBorrador(event.target.value);
+                setGuardado(false);
+                setError("");
+              }}
+            />
+            <span>horas</span>
+          </div>
+          <small id="event-work-budget-help">
+            No modifica las fechas ni las horas reales del evento.
+          </small>
+          {error && (
+            <div
+              id="event-work-budget-error"
+              className="field-error"
+              role="alert"
+              data-testid="event-work-budget-error"
+            >
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="daily-capacity-actions">
+          <button
+            type="submit"
+            className="button button-secondary button-small"
+            data-testid="save-event-work-budget"
+          >
+            Guardar presupuesto
+          </button>
+          {guardado && (
+            <span role="status" className="daily-capacity-saved">
+              Presupuesto guardado en este navegador
+            </span>
+          )}
+        </div>
+      </form>
+    </section>
+  );
 }
 
 function DetalleEvento() {
@@ -1840,6 +2333,7 @@ function DetalleEvento() {
     crearSubtarea,
   } = useStore();
   const [, setLocation] = useLocation();
+  const { usuario } = useAuth();
   const evento = eventos.find((e) => e.id === id);
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null);
@@ -1905,6 +2399,11 @@ function DetalleEvento() {
           <div className="score-number">{porcentaje}%</div>
         </div>
       </div>
+      <PresupuestoEvento
+        key={`${usuario?.id ?? "anonimo"}:${evento.id}`}
+        evento={evento}
+        usuarioId={usuario?.id ?? null}
+      />
       <div className="detail-actions">
         <button
           className="button button-primary"
@@ -1941,7 +2440,16 @@ function DetalleEvento() {
           tarea={tareaEditar}
           onClose={() => setTareaEditar(null)}
           onSave={async (t) => {
+            const problema = validarCapacidadesTarea(
+              eventos,
+              evento.id,
+              t as Subtarea,
+              usuario?.id ?? null,
+              tareaEditar.id,
+            );
+            if (problema) return problema;
             if (await actualizarSubtarea(evento.id, t)) setTareaEditar(null);
+            return false;
           }}
         />
       )}
@@ -1950,12 +2458,13 @@ function DetalleEvento() {
           evento={evento}
           tarea={mover}
           onClose={() => setMover(null)}
-          onSave={async (fecha, hora) => {
+          onSave={async (fecha, hora, estimacion) => {
             if (
               await actualizarSubtarea(evento.id, {
                 ...mover,
                 fechaLimite: fecha,
                 horaLimite: hora,
+                estimacion,
               })
             )
               setMover(null);
@@ -1970,8 +2479,15 @@ function DetalleEvento() {
                 evento={evento}
                 onCancel={() => setMostrarAgregar(false)}
                 onSave={async (t) => {
-                  const e = validarTarea(evento, t as Subtarea);
+                  const e = validarTarea(t as Subtarea);
                   if (e && Object.keys(e).length > 0) return false;
+                  const problema = validarCapacidadesTarea(
+                    eventos,
+                    evento.id,
+                    t as Subtarea,
+                    usuario?.id ?? null,
+                  );
+                  if (problema) return problema;
                   if (await crearSubtarea(evento.id, t))
                     setMostrarAgregar(false);
                   return true;
@@ -2025,7 +2541,7 @@ function TaskEditor({
   evento: Evento;
   tarea?: Subtarea;
   onCancel: () => void;
-  onSave: (tarea: Omit<Subtarea, "id">) => Promise<boolean>;
+  onSave: (tarea: Omit<Subtarea, "id">) => Promise<boolean | string>;
 }) {
   const [tarea, setTarea] = useState(
     tareaInicial
@@ -2045,15 +2561,16 @@ function TaskEditor({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const errs = validarTarea(evento, tarea as any as Subtarea);
+    const errs = validarTarea(tarea as any as Subtarea);
     if (Object.keys(errs).length > 0) {
       setError(errs);
       return;
     }
-    await onSave({
+    const resultado = await onSave({
       ...tarea,
       estimacion: timeToHours(tarea.estimacion as string),
     });
+    if (typeof resultado === "string") setError({ general: resultado });
   };
   return (
     <form className="card card-pad" onSubmit={submit}>
@@ -2083,8 +2600,7 @@ function TaskEditor({
           <input
             type="date"
             className={error.fechaLimite ? "error" : ""}
-            min={evento.fechaInicio}
-            max={evento.fechaFin}
+            data-testid="task-deadline-input"
             value={tarea.fechaLimite}
             onChange={(e) =>
               setTarea({ ...tarea, fechaLimite: e.target.value })
@@ -2150,7 +2666,7 @@ function TaskEditorDialog({
   evento: Evento;
   tarea?: Subtarea;
   onClose: () => void;
-  onSave: (t: any) => Promise<void>;
+  onSave: (t: any) => Promise<void | boolean | string>;
 }) {
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -2163,8 +2679,12 @@ function TaskEditorDialog({
           tarea={tarea}
           onCancel={onClose}
           onSave={async (t) => {
-            await onSave(tarea ? { ...t, id: tarea.id } : t);
-            return true;
+            const resultado = await onSave(tarea ? { ...t, id: tarea.id } : t);
+            return typeof resultado === "string"
+              ? resultado
+              : resultado === false
+                ? false
+                : true;
           }}
         />
       </div>
@@ -2272,23 +2792,147 @@ function ReprogramarDialog({
   evento: Evento;
   tarea: Subtarea;
   onClose: () => void;
-  onSave: (fecha: string, hora: string) => void;
+  onSave: (
+    fecha: string,
+    hora: string,
+    estimacion: number,
+  ) => void | Promise<unknown>;
 }) {
+  const { eventos } = useStore();
+  const { usuario } = useAuth();
   const [fecha, setFecha] = useState(tarea.fechaLimite);
   const [hora, setHora] = useState(tarea.horaLimite);
+  const [estimacion, setEstimacion] = useState(String(tarea.estimacion));
   const [error, setError] = useState("");
-  const confirmar = (e: FormEvent) => {
-    e.preventDefault();
-    const problema = validarTarea(evento, {
+  const [conflicto, setConflicto] = useState<{ fecha: string } | null>(null);
+  const [limite] = useState(() => leerLimiteDiario(usuario?.id ?? null));
+  const presupuestoEvento = leerPresupuestoEvento(evento, usuario?.id ?? null);
+  const conflictoRef = useRef<HTMLDivElement>(null);
+  const horasParaFecha = (fechaObjetivo: string, horasMovidas: number) =>
+    sumarHorasAbiertas(
+      eventos,
+      fechaObjetivo,
+      { eventoId: evento.id, tareaId: tarea.id },
+      tarea.estado === "hecho" ? 0 : horasMovidas,
+    );
+  const estimacionNumerica = Number(estimacion);
+  const horasDelDia = conflicto
+    ? horasParaFecha(conflicto.fecha, estimacionNumerica)
+    : 0;
+  const horasEvento = Number(
+    (totalHorasEvento(evento) - tarea.estimacion + estimacionNumerica).toFixed(
+      2,
+    ),
+  );
+  const problemasCapacidad = (fechaPropuesta: string, horas: number) => {
+    const diaria = horasParaFecha(fechaPropuesta, horas);
+    const totalEvento = Number(
+      (totalHorasEvento(evento) - tarea.estimacion + horas).toFixed(2),
+    );
+    const problemas: string[] = [];
+    if (!puedeGuardarPresupuestoEvento(usuario?.id ?? null)) {
+      problemas.push(
+        "Este navegador no permite validar ni guardar el presupuesto local del evento. Habilita el almacenamiento local e inténtalo de nuevo.",
+      );
+    }
+    if (diaria > limite)
+      problemas.push(
+        `Capacidad diaria: ${formatoHoras(diaria)} h / ${limite} h (exceso ${formatoHoras(diaria - limite)} h).`,
+      );
+    if (totalEvento > presupuestoEvento)
+      problemas.push(
+        `Presupuesto total del evento: ${formatoHoras(totalEvento)} h / ${formatoHoras(presupuestoEvento)} h (exceso ${formatoHoras(totalEvento - presupuestoEvento)} h).`,
+      );
+    return problemas;
+  };
+  const guardarReprogramacion = (fechaPropuesta: string, horas: number) => {
+    const problema = validarTarea({
       ...tarea,
-      fechaLimite: fecha,
+      fechaLimite: fechaPropuesta,
       horaLimite: hora,
+      estimacion: horas,
     });
     if (Object.keys(problema).length > 0) {
       setError(Object.values(problema).join(" "));
       return;
     }
-    onSave(fecha, hora);
+    const capacidad = problemasCapacidad(fechaPropuesta, horas);
+    if (capacidad.length) {
+      setError(capacidad.join(" "));
+      setConflicto({ fecha: fechaPropuesta });
+      return;
+    }
+    setError("");
+    void onSave(fechaPropuesta, hora, horas);
+  };
+
+  useEffect(() => {
+    if (!conflicto) return;
+    const previousFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    conflictoRef.current?.focus();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setConflicto(null);
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [Boolean(conflicto)]);
+
+  let fechaSugerida = "";
+  if (
+    conflicto &&
+    (tarea.estado === "hecho" || estimacionNumerica <= limite) &&
+    horasEvento <= presupuestoEvento
+  ) {
+    for (let dias = 1; dias <= 365; dias += 1) {
+      let fechaCandidata = "";
+      try {
+        fechaCandidata = sumarDias(conflicto.fecha, dias);
+      } catch {
+        break;
+      }
+      if (
+        !fechaCandidata ||
+        !Number.isFinite(Date.parse(`${fechaCandidata}T12:00:00`))
+      )
+        break;
+      if (problemasCapacidad(fechaCandidata, estimacionNumerica).length === 0) {
+        fechaSugerida = fechaCandidata;
+        break;
+      }
+    }
+  }
+
+  const confirmar = (e: FormEvent) => {
+    e.preventDefault();
+    if (!Number.isFinite(estimacionNumerica) || estimacionNumerica <= 0) {
+      setError("La estimación debe ser mayor que 0 horas.");
+      return;
+    }
+    const problema = validarTarea({
+      ...tarea,
+      fechaLimite: fecha,
+      horaLimite: hora,
+      estimacion: estimacionNumerica,
+    });
+    if (Object.keys(problema).length > 0) {
+      setError(Object.values(problema).join(" "));
+      return;
+    }
+    setError("");
+    if (problemasCapacidad(fecha, estimacionNumerica).length) {
+      setConflicto({ fecha });
+      return;
+    }
+    guardarReprogramacion(fecha, estimacionNumerica);
   };
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -2298,24 +2942,50 @@ function ReprogramarDialog({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="dialog-body">
+          <div className="dialog-title">
+            <h2>Reprogramar gestión</h2>
+            <p>{tarea.titulo}</p>
+          </div>
           <div className="form-grid">
             <div className="field">
-              <label>Nuevo plazo</label>
+              <label htmlFor="reprogramar-fecha">Nuevo plazo</label>
               <input
+                id="reprogramar-fecha"
                 type="date"
                 value={fecha}
-                min={evento.fechaInicio}
-                max={evento.fechaFin}
-                onChange={(e) => setFecha(e.target.value)}
+                data-testid="reprogramar-fecha"
+                onChange={(e) => {
+                  setFecha(e.target.value);
+                  setConflicto(null);
+                }}
               />
             </div>
             <div className="field">
-              <label>Nueva hora</label>
+              <label htmlFor="reprogramar-hora">Nueva hora</label>
               <input
+                id="reprogramar-hora"
                 type="time"
                 value={hora}
                 onChange={(e) => setHora(e.target.value)}
               />
+            </div>
+          </div>
+          <div className="field reprogramar-estimacion-field">
+            <label htmlFor="reprogramar-estimacion">Esfuerzo estimado</label>
+            <div className="daily-capacity-input">
+              <input
+                id="reprogramar-estimacion"
+                data-testid="reprogramar-estimacion"
+                type="number"
+                min="0.25"
+                step="0.25"
+                value={estimacion}
+                onChange={(e) => {
+                  setEstimacion(e.target.value);
+                  setConflicto(null);
+                }}
+              />
+              <span>horas</span>
             </div>
           </div>
           {error && <div className="error-box">{error}</div>}
@@ -2333,6 +3003,138 @@ function ReprogramarDialog({
           </button>
         </div>
       </form>
+      {conflicto && (
+        <div
+          className="capacity-conflict-backdrop"
+          onMouseDown={(event) => event.stopPropagation()}
+          data-testid="capacity-conflict-backdrop"
+        >
+          <section
+            ref={conflictoRef}
+            className="capacity-conflict-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="capacity-conflict-title"
+            aria-describedby="capacity-conflict-description"
+            tabIndex={-1}
+            data-testid="capacity-conflict-dialog"
+          >
+            <div className="capacity-conflict-heading">
+              <div>
+                <div className="eyebrow">CAPACIDAD Y PRESUPUESTO</div>
+                <h2 id="capacity-conflict-title">
+                  La reprogramación supera un límite de trabajo
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="button button-ghost button-small"
+                onClick={() => setConflicto(null)}
+                aria-label="Cerrar aviso de capacidad"
+                data-testid="close-capacity-conflict"
+              >
+                Cerrar
+              </button>
+            </div>
+            <p id="capacity-conflict-description" aria-live="polite">
+              Para el {fechaHoraBonita(conflicto.fecha)} quedarían{" "}
+              <strong>{formatoHoras(horasDelDia)} h de trabajo abierto</strong>{" "}
+              frente al límite diario de <strong>{limite} h</strong>
+              {horasDelDia > limite &&
+                ` (exceso de ${formatoHoras(horasDelDia - limite)} h).`}{" "}
+              El evento quedaría en{" "}
+              <strong>
+                {formatoHoras(horasEvento)} h de{" "}
+                {formatoHoras(presupuestoEvento)} h de presupuesto total
+              </strong>
+              {horasEvento > presupuestoEvento &&
+                ` (exceso de ${formatoHoras(horasEvento - presupuestoEvento)} h).`}
+            </p>
+            {error && (
+              <div className="error-box" role="alert">
+                {error}
+              </div>
+            )}
+            <div className="capacity-conflict-options">
+              {fechaSugerida ? (
+                <div className="capacity-conflict-option">
+                  <div>
+                    <strong>Mover a un día con capacidad</strong>
+                    <span>
+                      {fechaHoraBonita(fechaSugerida)} ·{" "}
+                      {formatoHoras(
+                        horasParaFecha(fechaSugerida, estimacionNumerica),
+                      )}{" "}
+                      h de {limite} h
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() =>
+                      guardarReprogramacion(fechaSugerida, estimacionNumerica)
+                    }
+                    data-testid="use-suggested-reschedule-date"
+                  >
+                    Usar fecha sugerida
+                  </button>
+                </div>
+              ) : (
+                <p>
+                  No se encontró una fecha posterior disponible dentro de los
+                  próximos 365 días que respete ambos límites.
+                </p>
+              )}
+              <div className="capacity-conflict-option">
+                <div>
+                  <strong>Reducir la estimación</strong>
+                  <span>El total se actualiza al cambiar las horas.</span>
+                </div>
+                <div className="capacity-conflict-reduce">
+                  <label htmlFor="reprogramar-estimacion-conflicto">
+                    Nueva estimación
+                  </label>
+                  <input
+                    id="reprogramar-estimacion-conflicto"
+                    data-testid="reprogramar-estimacion-conflicto"
+                    type="number"
+                    min="0.25"
+                    step="0.25"
+                    value={estimacion}
+                    onChange={(e) => setEstimacion(e.target.value)}
+                    aria-describedby="capacity-conflict-description"
+                  />
+                  <span>h</span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() =>
+                      guardarReprogramacion(fecha, estimacionNumerica)
+                    }
+                    disabled={
+                      !Number.isFinite(estimacionNumerica) ||
+                      estimacionNumerica <= 0 ||
+                      problemasCapacidad(fecha, estimacionNumerica).length > 0
+                    }
+                    data-testid="apply-reduced-estimation"
+                  >
+                    Aplicar horas
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="capacity-conflict-actions">
+              <button
+                type="button"
+                className="button button-ghost button-small"
+                onClick={() => setConflicto(null)}
+              >
+                Revisar fecha
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
