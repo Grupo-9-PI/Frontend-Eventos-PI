@@ -58,9 +58,16 @@ export type Evento = {
   lugar: string;
   notas: string;
   capacidadDiaria: number;
+  horasPlanificadas: number;
   subtareas: Subtarea[];
   creadoEn: string;
 };
+
+/** Datos editables de un evento (lo que se envía al API). */
+export type EventoPayload = Omit<
+  Evento,
+  "id" | "subtareas" | "creadoEn" | "horasPlanificadas"
+>;
 
 export type Resultado<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -115,6 +122,7 @@ function mapEventoFromApi(e: any): Evento {
     lugar: e.lugar,
     notas: e.notas_produccion || "",
     capacidadDiaria: Number(e.limite_diario_horas),
+    horasPlanificadas: Number(e.horas_planificadas ?? 0),
     creadoEn: e.creado_en ? e.creado_en.slice(0, 10) : hoyISO(),
     subtareas: (e.subtareas || []).map(mapSubtareaFromApi),
   };
@@ -158,7 +166,7 @@ function mapConflictoFromApi(c: any): ConflictoSobrecarga {
   };
 }
 
-function mapEventoToApi(e: Omit<Evento, "id" | "subtareas" | "creadoEn">) {
+function mapEventoToApi(e: EventoPayload) {
   return {
     nombre: e.nombre,
     tipo: e.tipo,
@@ -201,7 +209,7 @@ export const repositorioEventos = {
   },
 
   async crearEvento(
-    evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
+    evento: EventoPayload,
   ): Promise<Resultado<Evento>> {
     try {
       const response = await api.post("/eventos/", mapEventoToApi(evento));
@@ -218,7 +226,7 @@ export const repositorioEventos = {
 
   async actualizarEvento(
     id: string,
-    evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
+    evento: EventoPayload,
   ): Promise<Resultado<Evento>> {
     try {
       const response = await api.put(`/eventos/${id}/`, mapEventoToApi(evento));

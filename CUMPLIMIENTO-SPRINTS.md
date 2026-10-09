@@ -42,6 +42,7 @@ npm run dev                   # http://localhost:5173
 | `/crear` | Crear evento + plan inicial | Protegida |
 | `/evento/:id` | Detalle y gestiones del evento | Protegida |
 | `/progreso` | Métricas globales y por evento | Protegida |
+| `/opciones` | Opciones de la cuenta (límite diario) | Protegida |
 | (resto) | Vista 404 | — |
 
 Las rutas protegidas usan `ProtectedRoute`: sin sesión redirigen a `/login`.
@@ -151,8 +152,9 @@ el Documento Único):
 
 ### C2 — Límite diario configurable (persistido en la cuenta)
 
-- La tarjeta **Límite de trabajo diario** en `/hoy` lee y guarda contra `GET/PUT /api/config/`
-  (se eliminó el almacenamiento local del límite).
+- La página **/opciones** (nueva, en el menú lateral) concentra los ajustes de la cuenta. Su tarjeta
+  **Límite diario de trabajo** lee y guarda contra `GET/PUT /api/config/` (se eliminó el
+  almacenamiento local del límite).
 - Valor por defecto 6 h cuando no hay registro; validación en cliente y servidor de **1 a 16 h**.
 - Estados: guardando ("Guardando…"), éxito ("Capacidad actualizada") y error con el input intacto.
 
@@ -170,8 +172,15 @@ el Documento Único):
   `mover_otro_dia`; si el recálculo confirma, se cierra el diálogo y `/hoy` refleja el cambio.
 - **Reducir la estimación:** estrategia `reducir_horas`; si aún excede el límite, el diálogo lo
   informa con las nuevas cifras y nuevas sugerencias (el cambio ya quedó persistido).
-- El presupuesto local del evento (feature previa) se mantiene como **guardia secundario** con su
-  propio aviso y opción de reducir horas.
+- Las horas de trabajo de cada evento se **calculan en el backend** (`horas_planificadas`, suma de
+  las estimaciones de sus gestiones) y alimentan la detección de sobrecargas; ya no existe un
+  presupuesto local por navegador ni un campo de presupuesto en la creación del evento.
+
+### Extra — Edición de eventos
+
+- En el detalle del evento, el botón **Editar evento** abre un diálogo con los datos generales
+  (nombre, tipo, fechas, hora, duración, lugar y notas) y guarda con `PUT /api/eventos/{id}/`.
+- Las gestiones/subtareas no se tocan desde ese diálogo.
 
 ### C5 — Calidad IxD del diálogo de conflicto
 
