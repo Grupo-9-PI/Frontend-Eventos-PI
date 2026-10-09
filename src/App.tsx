@@ -22,6 +22,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Settings,
   Trash2,
   X,
   Sun,
@@ -53,6 +54,7 @@ import {
   sumarDias,
   type ConflictoSobrecarga,
   type Evento,
+  type EventoPayload,
   type EstadoSubtarea,
   type GruposHoy,
   type Prioridad,
@@ -86,13 +88,10 @@ type Store = {
     datos: { plazo?: string; horaLimite?: string; estimacion?: number },
   ) => Promise<Resultado<RespuestaResolverConflicto>>;
   crearEventoCompleto: (
-    evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
+    evento: EventoPayload,
     tareas: Omit<Subtarea, "id">[],
   ) => Promise<string | null>;
-  actualizarEvento: (
-    id: string,
-    evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
-  ) => Promise<boolean>;
+  actualizarEvento: (id: string, evento: EventoPayload) => Promise<boolean>;
   eliminarEvento: (id: string) => Promise<boolean>;
   crearSubtarea: (
     eventoId: string,
@@ -168,7 +167,7 @@ function useDatos(activo: boolean) {
     setAviso({ tipo: "success", texto: msg });
 
   const crearEventoCompleto = async (
-    evento: Omit<Evento, "id" | "subtareas" | "creadoEn">,
+    evento: EventoPayload,
     tareas: Omit<Subtarea, "id">[],
   ) => {
     const res = await repositorioEventos.crearEvento(evento);
@@ -191,10 +190,7 @@ function useDatos(activo: boolean) {
     }
     return res.data.id;
   };
-  const actualizarEvento = async (
-    id: string,
-    e: Omit<Evento, "id" | "subtareas" | "creadoEn">,
-  ) => {
+  const actualizarEvento = async (id: string, e: EventoPayload) => {
     const res = await repositorioEventos.actualizarEvento(id, e);
     if (!res.ok) {
       notifyError(res.error);
@@ -507,6 +503,7 @@ function Shell() {
       count: activos ? String(activos) : undefined,
     },
     { href: "/progreso", label: "Progreso", icon: LayoutDashboard },
+    { href: "/opciones", label: "Opciones", icon: Settings },
   ];
   return (
     <div className="app-shell">
@@ -735,6 +732,7 @@ function Shell() {
               <Route path="/crear" component={CrearEvento} />
               <Route path="/evento/:id" component={DetalleEvento} />
               <Route path="/progreso" component={Progreso} />
+              <Route path="/opciones" component={Opciones} />
               <Route component={NotFound} />
             </Switch>
           )}
@@ -936,72 +934,6 @@ function FilaTarea({
 }
 
 const LIMITE_DIARIO_PREDETERMINADO = 6;
-const PRESUPUESTO_EVENTO_PREDETERMINADO = 6;
-
-function clavePresupuestoEvento(usuarioId: number | null, eventoId: string) {
-  return `eventops:presupuesto-trabajo:${usuarioId ?? "anonimo"}:${eventoId}`;
-}
-
-function totalHorasEvento(evento: Evento) {
-  return Number(
-    evento.subtareas
-      .reduce((total, tarea) => total + tarea.estimacion, 0)
-      .toFixed(2),
-  );
-}
-
-function leerPresupuestoEvento(evento: Evento, usuarioId: number | null) {
-  const minimoPlanificado = totalHorasEvento(evento);
-  const porDefecto = Math.max(
-    PRESUPUESTO_EVENTO_PREDETERMINADO,
-    minimoPlanificado,
-  );
-  try {
-    const guardado = localStorage.getItem(
-      clavePresupuestoEvento(usuarioId, evento.id),
-    );
-    const numero = Number(guardado);
-    if (guardado !== null && Number.isFinite(numero) && numero > 0)
-      return numero;
-    // Los planes previos al presupuesto reciben un valor local que nunca invalida sus gestiones existentes.
-    localStorage.setItem(
-      clavePresupuestoEvento(usuarioId, evento.id),
-      String(porDefecto),
-    );
-  } catch {
-    // Si el navegador bloquea localStorage, la vista sigue usando un presupuesto seguro derivado del plan.
-  }
-  return porDefecto;
-}
-
-function guardarPresupuestoEvento(
-  usuarioId: number | null,
-  eventoId: string,
-  horas: number,
-) {
-  try {
-    localStorage.setItem(
-      clavePresupuestoEvento(usuarioId, eventoId),
-      String(horas),
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function puedeGuardarPresupuestoEvento(usuarioId: number | null) {
-  const clave = `eventops:prueba-almacenamiento:${usuarioId ?? "anonimo"}`;
-  try {
-    const anterior = localStorage.getItem(clave);
-    localStorage.setItem(clave, "ok");
-    if (anterior === null) localStorage.removeItem(clave);
-    else localStorage.setItem(clave, anterior);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function formatoHoras(horas: number) {
   return Number(horas.toFixed(2)).toLocaleString("es-CO", {
@@ -1013,43 +945,21 @@ function validarCapacidadesTarea(
   eventos: Evento[],
   eventoId: string,
   candidata: Subtarea,
-  usuarioId: number | null,
   limiteDiario: number,
   tareaExistenteId?: string,
 ) {
-  if (!puedeGuardarPresupuestoEvento(usuarioId)) {
-    return "Este navegador no permite validar ni guardar el presupuesto local del evento. Habilita el almacenamiento local e inténtalo de nuevo.";
-  }
   const evento = eventos.find((e) => e.id === eventoId);
   if (!evento) return "No se encontró el evento para validar sus capacidades.";
-  const presupuesto = leerPresupuestoEvento(evento, usuarioId);
-  const totalActual = totalHorasEvento(evento);
-  const anterior = tareaExistenteId
-    ? evento.subtareas.find((t) => t.id === tareaExistenteId)
-    : undefined;
-  const totalEvento = Number(
-    (totalActual - (anterior?.estimacion ?? 0) + candidata.estimacion).toFixed(
-      2,
-    ),
-  );
   const totalDia = sumarHorasAbiertas(
     eventos,
     candidata.fechaLimite,
     tareaExistenteId ? { eventoId, tareaId: tareaExistenteId } : undefined,
     candidata.estado === "hecho" ? 0 : candidata.estimacion,
   );
-  const mensajes: string[] = [];
-  if (totalEvento > presupuesto) {
-    mensajes.push(
-      `El evento quedaría en ${formatoHoras(totalEvento)} h de ${formatoHoras(presupuesto)} h de presupuesto total (exceso ${formatoHoras(totalEvento - presupuesto)} h).`,
-    );
-  }
   if (totalDia > limiteDiario) {
-    mensajes.push(
-      `El ${fechaBonita(candidata.fechaLimite, true)} quedaría en ${formatoHoras(totalDia)} h de ${limiteDiario} h de capacidad diaria (exceso ${formatoHoras(totalDia - limiteDiario)} h).`,
-    );
+    return `El ${fechaBonita(candidata.fechaLimite, true)} quedaría en ${formatoHoras(totalDia)} h de ${limiteDiario} h de capacidad diaria (exceso ${formatoHoras(totalDia - limiteDiario)} h).`;
   }
-  return mensajes.length ? mensajes.join(" ") : "";
+  return "";
 }
 
 function sumarHorasAbiertas(
@@ -1075,7 +985,7 @@ function sumarHorasAbiertas(
   return Number((otrasHoras + horasDeTareaMovida).toFixed(2));
 }
 
-function CapacidadDiariaHoy({
+function ConfiguracionCapacidadDiaria({
   eventos,
   fecha,
 }: {
@@ -1119,10 +1029,12 @@ function CapacidadDiariaHoy({
       aria-labelledby="daily-capacity-title"
     >
       <div className="daily-capacity-copy">
-        <div className="eyebrow">CAPACIDAD DEL ORGANIZADOR</div>
-        <h2 id="daily-capacity-title">Límite de trabajo diario</h2>
+        <div className="eyebrow">OPCIONES DE LA CUENTA</div>
+        <h2 id="daily-capacity-title">Límite diario de trabajo</h2>
         <p>
-          Define cuántas horas de gestiones abiertas quieres planificar por día.
+          Define cuántas horas de gestiones abiertas puedes planificar por día.
+          El sistema usa este límite para avisarte cuando reprogramar una
+          gestión produciría una sobrecarga.
         </p>
         <div
           className={`daily-capacity-total${carga > limiteDiario ? " over" : ""}`}
@@ -1197,13 +1109,24 @@ function CapacidadDiariaHoy({
   );
 }
 
+function Opciones() {
+  const { eventos } = useStore();
+  return (
+    <div>
+      <Encabezado
+        eyebrow="Cuenta"
+        titulo="Opciones"
+        descripcion="Ajustes que aplican a todas tus gestiones."
+      />
+      <ConfiguracionCapacidadDiaria eventos={eventos} fecha={hoyISO()} />
+    </div>
+  );
+}
+
 function Hoy() {
   const { eventos, hoy, errorCarga, refrescar, actualizarSubtarea } =
     useStore();
-  const [reprogramar, setReprogramar] = useState<{
-    evento: Evento;
-    tarea: Subtarea;
-  } | null>(null);
+  const [reprogramar, setReprogramar] = useState<Subtarea | null>(null);
 
   const grupos: GruposHoy = hoy?.grupos ?? {
     vencidas: [],
@@ -1238,10 +1161,7 @@ function Hoy() {
               tarea={t}
               mostrarEvento
               onToggle={() => cambiarEstado(t)}
-              onReprogramar={() => {
-                const e = eventos.find((ev) => ev.id === t.eventoId);
-                if (e) setReprogramar({ evento: e, tarea: t });
-              }}
+              onReprogramar={() => setReprogramar(t)}
             />
           ))}
         </div>
@@ -1291,7 +1211,6 @@ function Hoy() {
           </Link>
         }
       />
-      <CapacidadDiariaHoy eventos={eventos} fecha={hoyISO()} />
       {eventos.length === 0 ? (
         <EmptyState
           titulo="Todavía no hay eventos"
@@ -1321,8 +1240,7 @@ function Hoy() {
       )}
       {reprogramar && (
         <ReprogramarDialog
-          evento={reprogramar.evento}
-          tarea={reprogramar.tarea}
+          tarea={reprogramar}
           onClose={() => setReprogramar(null)}
         />
       )}
@@ -1460,7 +1378,6 @@ type FormEvento = {
   fechaFin: string;
   horaEvento: string;
   duracion: string;
-  presupuestoTrabajo: string;
   lugar: string;
   notas: string;
 };
@@ -1481,7 +1398,6 @@ const formEventoInicial = (): FormEvento => ({
   fechaFin: sumarDias(hoyISO(), 14),
   horaEvento: "19:00",
   duracion: "04:00",
-  presupuestoTrabajo: "",
   lugar: "",
   notas: "",
 });
@@ -1498,7 +1414,6 @@ const borradorInicial = (): BorradorTarea => ({
 function CrearEvento() {
   const [mostrarPlan, setMostrarPlan] = useState(false);
   const { crearEventoCompleto, eventos, limiteDiario } = useStore();
-  const { usuario } = useAuth();
   const [, setLocation] = useLocation();
   const [datos, setDatos] = useState<FormEvento>(formEventoInicial);
   const [tareas, setTareas] = useState<BorradorTarea[]>([]);
@@ -1624,19 +1539,7 @@ function CrearEvento() {
     }
 
     const validacion = validarDatosEvento(datos, tareas, mostrarPlan);
-    const presupuesto = Number(datos.presupuestoTrabajo);
-    if (!Number.isFinite(presupuesto) || presupuesto <= 0) {
-      validacion.presupuestoTrabajo =
-        "Indica un presupuesto de trabajo mayor que 0 horas.";
-    }
     if (mostrarPlan && tareas.length) {
-      const totalPlan = tareas.reduce(
-        (suma, t) => suma + timeToHours(t.estimacion),
-        0,
-      );
-      if (totalPlan > presupuesto) {
-        validacion.general = `El plan inicial suma ${formatoHoras(totalPlan)} h y el presupuesto del evento es ${formatoHoras(presupuesto)} h; excede por ${formatoHoras(totalPlan - presupuesto)} h.`;
-      }
       const porFecha = tareas.reduce<Record<string, number>>((acum, tarea) => {
         acum[tarea.fechaLimite] =
           (acum[tarea.fechaLimite] ?? 0) + timeToHours(tarea.estimacion);
@@ -1657,10 +1560,6 @@ function CrearEvento() {
           .join("; ");
         validacion.general = `${validacion.general ? `${validacion.general} ` : ""}El plan también supera la capacidad diaria: ${detalle}.`;
       }
-    }
-    if (!puedeGuardarPresupuestoEvento(usuario?.id ?? null)) {
-      validacion.presupuestoTrabajo =
-        "Este navegador no permite guardar el presupuesto local. Habilita el almacenamiento local antes de crear el evento.";
     }
 
     if (mostrarPlan && !tareas.length && Object.keys(errorNuevo).length === 0) {
@@ -1683,7 +1582,6 @@ function CrearEvento() {
       fechaFin: datos.fechaFin,
       horaEvento: datos.horaEvento,
       duracion: timeToHours(datos.duracion),
-      // presupuestoTrabajo vive solo en el almacenamiento local; nunca se manda al API ni se confunde con duración.
       lugar: datos.lugar.trim(),
       notas: datos.notas.trim(),
       capacidadDiaria: 24,
@@ -1700,14 +1598,6 @@ function CrearEvento() {
     }));
     const id = await crearEventoCompleto(eventoPayload, tareasPayload);
     if (id) {
-      const guardado = guardarPresupuestoEvento(
-        usuario?.id ?? null,
-        id,
-        Number(datos.presupuestoTrabajo),
-      );
-      if (!guardado) {
-        // La API ya guardó el evento. Si el almacenamiento local está bloqueado, se informa desde el detalle mediante su valor derivado.
-      }
       setLocation("/evento/" + id);
     }
   };
@@ -1846,36 +1736,6 @@ function CrearEvento() {
                 onChange={(e) => setCampo("duracion", e.target.value)}
                 aria-label="Duración del evento en horas y minutos"
               />
-            </div>
-            <div className="field">
-              <label htmlFor="presupuesto-trabajo-evento">
-                Presupuesto de trabajo <span className="req">*</span>
-              </label>
-              {error.presupuestoTrabajo && (
-                <div className="field-error" role="alert">
-                  {error.presupuestoTrabajo}
-                </div>
-              )}
-              <div className="daily-capacity-input">
-                <input
-                  id="presupuesto-trabajo-evento"
-                  data-testid="event-work-budget-input"
-                  type="number"
-                  min="0.25"
-                  step="0.25"
-                  value={datos.presupuestoTrabajo}
-                  aria-invalid={Boolean(error.presupuestoTrabajo)}
-                  onChange={(e) =>
-                    setCampo("presupuestoTrabajo", e.target.value)
-                  }
-                />
-                <span>horas de gestiones</span>
-              </div>
-              <small className="field-hint">
-                Esfuerzo total permitido para todas las gestiones, incluidas las
-                completadas. No es la duración real del evento; se guarda solo
-                en este navegador.
-              </small>
             </div>
             <div className="field full">
               <label>Notas</label>
@@ -2177,12 +2037,6 @@ function validarDatosEvento(
   } else if (datos.fechaFin < datos.fechaInicio) e.fechaFin = "Inválida.";
   if (timeToHours(datos.duracion) <= 0)
     e.duracion = "Indica una duración mayor a 0.";
-  if (
-    !Number.isFinite(Number(datos.presupuestoTrabajo)) ||
-    Number(datos.presupuestoTrabajo) <= 0
-  )
-    e.presupuestoTrabajo =
-      "Indica un presupuesto de trabajo mayor que 0 horas.";
 
   if (!datos.horaEvento) e.horaEvento = "Obligatoria.";
   if (mostrarPlan && !tareas.length)
@@ -2201,125 +2055,6 @@ function validarTarea(candidata: Subtarea) {
   return e;
 }
 
-function PresupuestoEvento({
-  evento,
-  usuarioId,
-}: {
-  evento: Evento;
-  usuarioId: number | null;
-}) {
-  const actual = leerPresupuestoEvento(evento, usuarioId);
-  const [borrador, setBorrador] = useState(String(actual));
-  const [presupuesto, setPresupuesto] = useState(actual);
-  const [error, setError] = useState("");
-  const [guardado, setGuardado] = useState(false);
-  const total = totalHorasEvento(evento);
-  const guardar = (event: FormEvent) => {
-    event.preventDefault();
-    const nuevo = Number(borrador);
-    if (!Number.isFinite(nuevo) || nuevo <= 0) {
-      setError("El presupuesto debe ser mayor que 0 horas.");
-      return;
-    }
-    if (nuevo < total) {
-      setError(
-        `El evento ya suma ${formatoHoras(total)} h en sus gestiones (incluidas las completadas). El presupuesto mínimo es ${formatoHoras(total)} h.`,
-      );
-      return;
-    }
-    if (!guardarPresupuestoEvento(usuarioId, evento.id, nuevo)) {
-      setError("No se pudo guardar el presupuesto en este navegador.");
-      return;
-    }
-    setPresupuesto(nuevo);
-    setBorrador(String(nuevo));
-    setError("");
-    setGuardado(true);
-  };
-  return (
-    <section
-      className="daily-capacity-card card"
-      aria-labelledby="event-work-budget-title"
-      data-testid="event-work-budget-panel"
-    >
-      <div className="daily-capacity-copy">
-        <div className="eyebrow">PRESUPUESTO LOCAL DEL EVENTO</div>
-        <h2 id="event-work-budget-title">Horas de trabajo planificadas</h2>
-        <p>
-          Cuenta todas las gestiones del evento, incluidas las completadas. Es
-          independiente de la duración real del evento. Este valor solo se
-          guarda en este navegador.
-        </p>
-        <div
-          className={`daily-capacity-total${total > presupuesto ? " over" : ""}`}
-          data-testid="event-work-budget-total"
-          aria-live="polite"
-        >
-          <strong>{formatoHoras(total)} h</strong> de{" "}
-          <strong>{formatoHoras(presupuesto)} h</strong>
-          {total > presupuesto && (
-            <span>Exceso de {formatoHoras(total - presupuesto)} h.</span>
-          )}
-        </div>
-      </div>
-      <form className="daily-capacity-form" onSubmit={guardar} noValidate>
-        <div className="field">
-          <label htmlFor="event-work-budget-edit">
-            Presupuesto total de trabajo
-          </label>
-          <div className="daily-capacity-input">
-            <input
-              id="event-work-budget-edit"
-              data-testid="event-work-budget-edit"
-              type="number"
-              min="0.25"
-              step="0.25"
-              value={borrador}
-              aria-invalid={Boolean(error)}
-              aria-describedby={
-                error ? "event-work-budget-error" : "event-work-budget-help"
-              }
-              onChange={(event) => {
-                setBorrador(event.target.value);
-                setGuardado(false);
-                setError("");
-              }}
-            />
-            <span>horas</span>
-          </div>
-          <small id="event-work-budget-help">
-            No modifica las fechas ni las horas reales del evento.
-          </small>
-          {error && (
-            <div
-              id="event-work-budget-error"
-              className="field-error"
-              role="alert"
-              data-testid="event-work-budget-error"
-            >
-              {error}
-            </div>
-          )}
-        </div>
-        <div className="daily-capacity-actions">
-          <button
-            type="submit"
-            className="button button-secondary button-small"
-            data-testid="save-event-work-budget"
-          >
-            Guardar presupuesto
-          </button>
-          {guardado && (
-            <span role="status" className="daily-capacity-saved">
-              Presupuesto guardado en este navegador
-            </span>
-          )}
-        </div>
-      </form>
-    </section>
-  );
-}
-
 function DetalleEvento() {
   const { id } = useParams<{ id: string }>();
   const {
@@ -2329,13 +2064,14 @@ function DetalleEvento() {
     eliminarSubtarea,
     eliminarEvento,
     crearSubtarea,
+    actualizarEvento,
   } = useStore();
   const [, setLocation] = useLocation();
-  const { usuario } = useAuth();
   const evento = eventos.find((e) => e.id === id);
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null);
   const [mover, setMover] = useState<Subtarea | null>(null);
+  const [editarEvento, setEditarEvento] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState<{
     tipo: "evento" | "tarea";
     id: string;
@@ -2392,16 +2128,16 @@ function DetalleEvento() {
       <div className="detail-head">
         <div>
           <h1 className="detail-title">{evento.nombre}</h1>
+          <p className="page-description" style={{ marginTop: 6 }}>
+            {formatoHoras(evento.horasPlanificadas)} h de trabajo planificadas ·{" "}
+            {pendientes.length}{" "}
+            {pendientes.length === 1 ? "gestión abierta" : "gestiones abiertas"}
+          </p>
         </div>
         <div className="detail-score">
           <div className="score-number">{porcentaje}%</div>
         </div>
       </div>
-      <PresupuestoEvento
-        key={`${usuario?.id ?? "anonimo"}:${evento.id}`}
-        evento={evento}
-        usuarioId={usuario?.id ?? null}
-      />
       <div className="detail-actions">
         <button
           className="button button-primary"
@@ -2409,6 +2145,12 @@ function DetalleEvento() {
         >
           <Plus size={15} />{" "}
           {mostrarAgregar ? "Cerrar formulario" : "Agregar gestión"}
+        </button>
+        <button
+          className="button button-secondary"
+          onClick={() => setEditarEvento(true)}
+        >
+          <Pencil size={14} /> Editar evento
         </button>
         <button className="button button-danger" onClick={eliminarEv}>
           <Trash2 size={14} /> Eliminar evento
@@ -2442,7 +2184,6 @@ function DetalleEvento() {
               eventos,
               evento.id,
               t as Subtarea,
-              usuario?.id ?? null,
               limiteDiario,
               tareaEditar.id,
             );
@@ -2452,9 +2193,15 @@ function DetalleEvento() {
           }}
         />
       )}
+      {editarEvento && (
+        <EventoEditorDialog
+          evento={evento}
+          onClose={() => setEditarEvento(false)}
+          onSave={(payload) => actualizarEvento(evento.id, payload)}
+        />
+      )}
       {mover && (
         <ReprogramarDialog
-          evento={evento}
           tarea={mover}
           onClose={() => setMover(null)}
         />
@@ -2473,7 +2220,6 @@ function DetalleEvento() {
                     eventos,
                     evento.id,
                     t as Subtarea,
-                    usuario?.id ?? null,
                     limiteDiario,
                   );
                   if (problema) return problema;
@@ -2772,44 +2518,245 @@ function ConfirmDialog({
   );
 }
 
-type ConflictoDialogo =
-  | { tipo: "capacidad"; datos: ConflictoSobrecarga }
-  | { tipo: "presupuesto"; totalEvento: number; presupuesto: number };
+const TIPOS_EVENTO = [
+  "Lanzamiento",
+  "Fiesta",
+  "Taller",
+  "Reunión",
+  "Conferencia",
+];
+
+function EventoEditorDialog({
+  evento,
+  onClose,
+  onSave,
+}: {
+  evento: Evento;
+  onClose: () => void;
+  onSave: (payload: EventoPayload) => Promise<boolean>;
+}) {
+  const [datos, setDatos] = useState<FormEvento>(() => ({
+    nombre: evento.nombre,
+    tipo: evento.tipo,
+    fechaInicio: evento.fechaInicio,
+    fechaFin: evento.fechaFin,
+    horaEvento: evento.horaEvento,
+    duracion: hoursToTime(evento.duracion),
+    lugar: evento.lugar,
+    notas: evento.notas,
+  }));
+  const [error, setError] = useState<Record<string, string>>({});
+  const [guardando, setGuardando] = useState(false);
+
+  const setCampo = (campo: keyof FormEvento, valor: string) => {
+    setDatos((d) => ({ ...d, [campo]: valor }));
+    setError((errs) => ({ ...errs, [campo]: "" }));
+  };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const validacion = validarDatosEvento(datos, [], false);
+    if (!/^\d{2}:\d{2}$/.test(datos.duracion) || timeToHours(datos.duracion) <= 0) {
+      validacion.duracion = "Indica una duración válida (HH:MM).";
+    }
+    if (Object.keys(validacion).length > 0) {
+      setError(validacion);
+      return;
+    }
+    setGuardando(true);
+    const ok = await onSave({
+      nombre: datos.nombre.trim(),
+      tipo: datos.tipo,
+      fechaInicio: datos.fechaInicio,
+      fechaFin: datos.fechaFin,
+      horaEvento: datos.horaEvento,
+      duracion: timeToHours(datos.duracion),
+      lugar: datos.lugar.trim(),
+      notas: datos.notas.trim(),
+      capacidadDiaria: evento.capacidadDiaria,
+    });
+    setGuardando(false);
+    if (ok) onClose();
+  };
+
+  const tipoPersonalizado = !TIPOS_EVENTO.includes(datos.tipo);
+  return (
+    <div className="dialog-backdrop" onMouseDown={onClose}>
+      <form
+        className="dialog"
+        style={{ width: "min(680px, 100%)" }}
+        onSubmit={submit}
+        onMouseDown={(e) => e.stopPropagation()}
+        noValidate
+      >
+        <div className="dialog-body">
+          <div className="dialog-title">
+            <h2>Editar evento</h2>
+            <p>Actualiza los datos generales; las gestiones no se modifican.</p>
+          </div>
+          <div className="form-grid">
+            <div className="field full">
+              <label>
+                Nombre <span className="req">*</span>
+              </label>
+              {error.nombre && (
+                <div className="field-error">{error.nombre}</div>
+              )}
+              <input
+                className={error.nombre ? "error" : ""}
+                value={datos.nombre}
+                onChange={(e) => setCampo("nombre", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Tipo</label>
+              <select
+                value={tipoPersonalizado ? "Otro" : datos.tipo}
+                onChange={(e) =>
+                  setCampo(
+                    "tipo",
+                    e.target.value === "Otro" ? "" : e.target.value,
+                  )
+                }
+              >
+                {TIPOS_EVENTO.map((tipo) => (
+                  <option key={tipo} value={tipo}>
+                    {tipo}
+                  </option>
+                ))}
+                <option value="Otro">Otro...</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>
+                Lugar <span className="req">*</span>
+              </label>
+              {error.lugar && <div className="field-error">{error.lugar}</div>}
+              <input
+                className={error.lugar ? "error" : ""}
+                value={datos.lugar}
+                onChange={(e) => setCampo("lugar", e.target.value)}
+              />
+            </div>
+            {tipoPersonalizado && (
+              <div className="field full">
+                <input
+                  placeholder="Escribe el tipo personalizado..."
+                  value={datos.tipo}
+                  onChange={(e) => setCampo("tipo", e.target.value)}
+                />
+              </div>
+            )}
+            <div className="field">
+              <label>
+                Inicio <span className="req">*</span>
+              </label>
+              {error.fechaInicio && (
+                <div className="field-error">{error.fechaInicio}</div>
+              )}
+              <input
+                type="date"
+                className={error.fechaInicio ? "error" : ""}
+                value={datos.fechaInicio}
+                onChange={(e) => setCampo("fechaInicio", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>
+                Fin <span className="req">*</span>
+              </label>
+              {error.fechaFin && (
+                <div className="field-error">{error.fechaFin}</div>
+              )}
+              <input
+                type="date"
+                className={error.fechaFin ? "error" : ""}
+                value={datos.fechaFin}
+                onChange={(e) => setCampo("fechaFin", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>
+                Hora <span className="req">*</span>
+              </label>
+              {error.horaEvento && (
+                <div className="field-error">{error.horaEvento}</div>
+              )}
+              <input
+                type="time"
+                className={error.horaEvento ? "error" : ""}
+                value={datos.horaEvento}
+                onChange={(e) => setCampo("horaEvento", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>
+                Duración (HH:MM) <span className="req">*</span>
+              </label>
+              {error.duracion && (
+                <div className="field-error">{error.duracion}</div>
+              )}
+              <input
+                type="text"
+                pattern="[0-9]{2}:[0-9]{2}"
+                placeholder="00:00"
+                maxLength={5}
+                className={error.duracion ? "error" : ""}
+                value={datos.duracion}
+                onChange={(e) => setCampo("duracion", e.target.value)}
+                aria-label="Duración del evento en horas y minutos"
+              />
+            </div>
+            <div className="field full">
+              <label>Notas</label>
+              <textarea
+                value={datos.notas}
+                onChange={(e) => setCampo("notas", e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="form-actions">
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={onClose}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={guardando}
+          >
+            {guardando ? "Guardando…" : "Guardar cambios"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
 function ReprogramarDialog({
-  evento,
   tarea,
   onClose,
 }: {
-  evento: Evento;
   tarea: Subtarea;
   onClose: () => void;
 }) {
   const { reprogramarSubtarea, resolverConflictoSubtarea } = useStore();
-  const { usuario } = useAuth();
   const [fecha, setFecha] = useState(tarea.fechaLimite);
   const [hora, setHora] = useState(tarea.horaLimite);
   const [estimacion, setEstimacion] = useState(String(tarea.estimacion));
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
-  const [conflicto, setConflicto] = useState<ConflictoDialogo | null>(null);
+  const [conflicto, setConflicto] = useState<ConflictoSobrecarga | null>(null);
   const [avisoPersistencia, setAvisoPersistencia] = useState("");
   const [estimacionConflicto, setEstimacionConflicto] = useState<number | null>(
     null,
   );
   const conflictoRef = useRef<HTMLDivElement>(null);
-  const presupuestoEvento = leerPresupuestoEvento(evento, usuario?.id ?? null);
   const estimacionNumerica = Number(estimacion);
-
-  // Guardia secundario local: el presupuesto de trabajo del evento.
-  const excesoPresupuesto = (horas: number) => {
-    const totalEvento = Number(
-      (totalHorasEvento(evento) - tarea.estimacion + horas).toFixed(2),
-    );
-    return totalEvento > presupuestoEvento
-      ? { totalEvento, presupuesto: presupuestoEvento }
-      : null;
-  };
 
   const intentarGuardar = async (fechaPropuesta: string, horas: number) => {
     const problema = validarTarea({
@@ -2820,19 +2767,6 @@ function ReprogramarDialog({
     });
     if (Object.keys(problema).length > 0) {
       setError(Object.values(problema).join(" "));
-      return;
-    }
-    if (!puedeGuardarPresupuestoEvento(usuario?.id ?? null)) {
-      setError(
-        "Este navegador no permite validar ni guardar el presupuesto local del evento. Habilita el almacenamiento local e inténtalo de nuevo.",
-      );
-      return;
-    }
-    const presupuestoExcedido = excesoPresupuesto(horas);
-    if (presupuestoExcedido) {
-      setError("");
-      setAvisoPersistencia("");
-      setConflicto({ tipo: "presupuesto", ...presupuestoExcedido });
       return;
     }
     setGuardando(true);
@@ -2850,7 +2784,7 @@ function ReprogramarDialog({
     if (res.tipo === "conflicto") {
       setAvisoPersistencia("");
       setEstimacionConflicto(horas);
-      setConflicto({ tipo: "capacidad", datos: res.conflicto });
+      setConflicto(res.conflicto);
       return;
     }
     setError(res.error);
@@ -2892,30 +2826,21 @@ function ReprogramarDialog({
       `El cambio se guardó, pero ese día sigue sobrecargado: quedan ${formatoHoras(res.data.horasExceso)} h por encima de tu límite.`,
     );
     setConflicto({
-      tipo: "capacidad",
-      datos: {
-        fecha: fechaSugerida,
-        limiteHoras: res.data.limiteHoras,
-        horasActuales: 0,
-        horasNuevaGestion: estimacionNumerica,
-        horasTotalesProyectadas: res.data.horasTotalesProyectadas,
-        horasExceso: res.data.horasExceso,
-        estrategiasDisponibles: ["mover_otro_dia", "reducir_horas"],
-        fechasSugeridas: res.data.fechasSugeridas,
-        mensaje: res.data.mensaje,
-      },
+      fecha: fechaSugerida,
+      limiteHoras: res.data.limiteHoras,
+      horasActuales: 0,
+      horasNuevaGestion: estimacionNumerica,
+      horasTotalesProyectadas: res.data.horasTotalesProyectadas,
+      horasExceso: res.data.horasExceso,
+      estrategiasDisponibles: ["mover_otro_dia", "reducir_horas"],
+      fechasSugeridas: res.data.fechasSugeridas,
+      mensaje: res.data.mensaje,
     });
   };
 
   const aplicarReduccion = async () => {
     if (!Number.isFinite(estimacionNumerica) || estimacionNumerica <= 0) {
       setError("La estimación debe ser mayor que 0 horas.");
-      return;
-    }
-    const presupuestoExcedido = excesoPresupuesto(estimacionNumerica);
-    if (presupuestoExcedido) {
-      setAvisoPersistencia("");
-      setConflicto({ tipo: "presupuesto", ...presupuestoExcedido });
       return;
     }
     setGuardando(true);
@@ -2937,18 +2862,15 @@ function ReprogramarDialog({
       `Las horas se guardaron, pero el día sigue sobrecargado: quedan ${formatoHoras(res.data.horasExceso)} h por encima de tu límite.`,
     );
     setConflicto({
-      tipo: "capacidad",
-      datos: {
-        fecha,
-        limiteHoras: res.data.limiteHoras,
-        horasActuales: 0,
-        horasNuevaGestion: estimacionNumerica,
-        horasTotalesProyectadas: res.data.horasTotalesProyectadas,
-        horasExceso: res.data.horasExceso,
-        estrategiasDisponibles: ["mover_otro_dia", "reducir_horas"],
-        fechasSugeridas: res.data.fechasSugeridas,
-        mensaje: res.data.mensaje,
-      },
+      fecha,
+      limiteHoras: res.data.limiteHoras,
+      horasActuales: 0,
+      horasNuevaGestion: estimacionNumerica,
+      horasTotalesProyectadas: res.data.horasTotalesProyectadas,
+      horasExceso: res.data.horasExceso,
+      estrategiasDisponibles: ["mover_otro_dia", "reducir_horas"],
+      fechasSugeridas: res.data.fechasSugeridas,
+      mensaje: res.data.mensaje,
     });
   };
 
@@ -3069,15 +2991,14 @@ function ReprogramarDialog({
             tabIndex={-1}
             data-testid="capacity-conflict-dialog"
           >
-            {conflicto.tipo === "capacidad" ? (
-              <>
-                <div className="capacity-conflict-heading">
-                  <div>
-                    <div className="eyebrow">CAPACIDAD DIARIA</div>
-                    <h2 id="capacity-conflict-title">
-                      La reprogramación supera tu límite diario
-                    </h2>
-                  </div>
+            <>
+              <div className="capacity-conflict-heading">
+                <div>
+                  <div className="eyebrow">CAPACIDAD DIARIA</div>
+                  <h2 id="capacity-conflict-title">
+                    La reprogramación supera tu límite diario
+                  </h2>
+                </div>
                   <button
                     type="button"
                     className="button button-ghost button-small"
@@ -3089,17 +3010,17 @@ function ReprogramarDialog({
                   </button>
                 </div>
                 <p id="capacity-conflict-description" aria-live="polite">
-                  Para el {fechaHoraBonita(conflicto.datos.fecha)} quedarías con{" "}
+                  Para el {fechaHoraBonita(conflicto.fecha)} quedarías con{" "}
                   <strong>
-                    {formatoHoras(conflicto.datos.horasTotalesProyectadas)} h
+                    {formatoHoras(conflicto.horasTotalesProyectadas)} h
                     planificadas
                   </strong>{" "}
-                  (límite {formatoHoras(conflicto.datos.limiteHoras)} h)
-                  {conflicto.datos.horasExceso > 0 &&
-                    `, un exceso de ${formatoHoras(conflicto.datos.horasExceso)} h`}
+                  (límite {formatoHoras(conflicto.limiteHoras)} h)
+                  {conflicto.horasExceso > 0 &&
+                    `, un exceso de ${formatoHoras(conflicto.horasExceso)} h`}
                   .
-                  {conflicto.datos.horasActuales > 0 &&
-                    ` Otras gestiones abiertas de ese día suman ${formatoHoras(conflicto.datos.horasActuales)} h.`}
+                  {conflicto.horasActuales > 0 &&
+                    ` Otras gestiones abiertas de ese día suman ${formatoHoras(conflicto.horasActuales)} h.`}
                 </p>
                 {avisoPersistencia && (
                   <div className="warning-box" role="status">
@@ -3112,8 +3033,8 @@ function ReprogramarDialog({
                   </div>
                 )}
                 <div className="capacity-conflict-options">
-                  {conflicto.datos.fechasSugeridas.length ? (
-                    conflicto.datos.fechasSugeridas.map((sugerida) => (
+                  {conflicto.fechasSugeridas.length ? (
+                    conflicto.fechasSugeridas.map((sugerida) => (
                       <div
                         className="capacity-conflict-option"
                         key={sugerida.fecha}
@@ -3123,7 +3044,7 @@ function ReprogramarDialog({
                           <span>
                             {fechaHoraBonita(sugerida.fecha)} ·{" "}
                             {formatoHoras(sugerida.horasTotalesProyectadas)} h de{" "}
-                            {formatoHoras(conflicto.datos.limiteHoras)} h
+                            {formatoHoras(conflicto.limiteHoras)} h
                           </span>
                         </div>
                         <button
@@ -3189,94 +3110,7 @@ function ReprogramarDialog({
                     Revisar fecha
                   </button>
                 </div>
-              </>
-            ) : (
-              <>
-                <div className="capacity-conflict-heading">
-                  <div>
-                    <div className="eyebrow">PRESUPUESTO DEL EVENTO</div>
-                    <h2 id="capacity-conflict-title">
-                      La reprogramación supera el presupuesto del evento
-                    </h2>
-                  </div>
-                  <button
-                    type="button"
-                    className="button button-ghost button-small"
-                    onClick={cerrarConflicto}
-                    aria-label="Cerrar aviso de presupuesto"
-                    data-testid="close-capacity-conflict"
-                  >
-                    Cerrar
-                  </button>
-                </div>
-                <p id="capacity-conflict-description" aria-live="polite">
-                  El evento quedaría en{" "}
-                  <strong>
-                    {formatoHoras(conflicto.totalEvento)} h planificadas
-                  </strong>{" "}
-                  frente a un presupuesto de{" "}
-                  <strong>{formatoHoras(conflicto.presupuesto)} h</strong> (exceso
-                  de{" "}
-                  {formatoHoras(conflicto.totalEvento - conflicto.presupuesto)} h).
-                </p>
-                {error && (
-                  <div className="error-box" role="alert">
-                    {error}
-                  </div>
-                )}
-                <div className="capacity-conflict-options">
-                  <div className="capacity-conflict-option">
-                    <div>
-                      <strong>Reducir la estimación</strong>
-                      <span>
-                        Ajusta las horas para que el plan del evento quepa en su
-                        presupuesto.
-                      </span>
-                    </div>
-                    <div className="capacity-conflict-reduce">
-                      <label htmlFor="reprogramar-estimacion-conflicto">
-                        Nueva estimación
-                      </label>
-                      <input
-                        id="reprogramar-estimacion-conflicto"
-                        data-testid="reprogramar-estimacion-conflicto"
-                        type="number"
-                        min="0.25"
-                        step="0.25"
-                        value={estimacion}
-                        onChange={(e) => setEstimacion(e.target.value)}
-                        aria-describedby="capacity-conflict-description"
-                      />
-                      <span>h</span>
-                      <button
-                        type="button"
-                        className="button button-secondary button-small"
-                        onClick={() =>
-                          void intentarGuardar(fecha, estimacionNumerica)
-                        }
-                        disabled={
-                          guardando ||
-                          !Number.isFinite(estimacionNumerica) ||
-                          estimacionNumerica <= 0
-                        }
-                        data-testid="apply-reduced-estimation"
-                      >
-                        Aplicar horas
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="capacity-conflict-actions">
-                  <button
-                    type="button"
-                    className="button button-ghost button-small"
-                    onClick={cerrarConflicto}
-                  >
-                    Revisar fecha
-                  </button>
-                </div>
-              </>
-            )}
+            </>
           </section>
         </div>
       )}
