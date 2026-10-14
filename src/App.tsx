@@ -19,10 +19,12 @@ import {
   LayoutDashboard,
   ListChecks,
   MapPin,
+  PauseCircle,
   Pencil,
   Plus,
   RotateCcw,
   Settings,
+  StickyNote,
   Trash2,
   X,
   Sun,
@@ -48,10 +50,15 @@ import {
   fechaHoraBonita,
   generarId,
   hoyISO,
+  aplicarCapaPospuestas,
+  filtrarHoyPorPospuestas,
   repositorioConfiguracion,
   repositorioEventos,
   repositorioHoy,
+  repositorioPospuestas,
   sumarDias,
+  tareasPospuestas,
+  CODIGO_ESTADO_POSPUESTA,
   type ConflictoSobrecarga,
   type Evento,
   type EventoPayload,
@@ -68,6 +75,14 @@ import {
 import "./index.css";
 
 type Aviso = { tipo: "success" | "error"; texto: string };
+/** Datos opcionales al posponer una gestión. */
+type PeticionPosponer = {
+  notaPospuesta: string;
+  fechaLimite?: string;
+  horaLimite?: string;
+};
+/** Gestión pospuesta con el evento al que pertenece, para pintar su nota. */
+type TareaPospuesta = Subtarea & { eventoId: string; eventoNombre: string };
 type Store = {
   eventos: Evento[];
   hoy: RespuestaHoy | null;
@@ -102,6 +117,11 @@ type Store = {
     subtarea: Subtarea,
   ) => Promise<boolean>;
   eliminarSubtarea: (eventoId: string, subtareaId: string) => Promise<boolean>;
+  posponerSubtarea: (id: string, datos: PeticionPosponer) => Promise<boolean>;
+  reactivarSubtarea: (id: string) => Promise<boolean>;
+  /** Gestiones pospuestas de la cuenta, con su nota. */
+  pospuestas: TareaPospuesta[];
+  totalPospuestas: number;
 };
 const StoreContext = createContext<Store | null>(null);
 function useStore(): Store {
@@ -121,15 +141,19 @@ function useDatos(activo: boolean) {
   const cargarTodo = async (mostrarCarga = true) => {
     if (mostrarCarga) setCargando(true);
     const inicio = Date.now();
+    // La capa local de posposiciones se lee antes de la respuesta: el servidor
+    // manda en lo que ya soporta, la capa cubre lo que todavía no.
+    const capa = repositorioPospuestas.leer();
     const [resEventos, resHoy, resConfig] = await Promise.all([
       repositorioEventos.cargar(),
       repositorioHoy.cargar(),
       repositorioConfiguracion.cargar(),
     ]);
     const errores: string[] = [];
-    if (resEventos.ok) setEventos(resEventos.data);
+    if (resEventos.ok)
+      setEventos(aplicarCapaPospuestas(resEventos.data, capa));
     else errores.push(resEventos.error);
-    if (resHoy.ok) setHoy(resHoy.data);
+    if (resHoy.ok) setHoy(filtrarHoyPorPospuestas(resHoy.data, capa));
     else errores.push(resHoy.error);
     if (resConfig.ok) setLimiteDiario(resConfig.data);
     else errores.push(resConfig.error);
@@ -165,6 +189,62 @@ function useDatos(activo: boolean) {
   const notifyError = (err: string) => setAviso({ tipo: "error", texto: err });
   const notifySuccess = (msg: string) =>
     setAviso({ tipo: "success", texto: msg });
+
+  /**
+   * Refleja el cambio de una gestión en memoria, antes de que responda el
+   * servidor: /hoy descuenta la carga urgente al instante y las barras de
+   * progreso se mueven sin recargar la página. Si la petición falla, el
+   * `cargarTodo(false)` del error deja el estado real otra vez.
+   */
+  const reflejarEnMemoria = (
+    id: string,
+    cambios: Partial<Subtarea>,
+    visibleEnHoy: boolean,
+  ) => {
+    setEventos((lista) =>
+      lista.map((evento) => ({
+        ...evento,
+        subtareas: evento.subtareas.map((t) =>
+          t.id === id ? { ...t, ...cambios } : t,
+        ),
+      })),
+    );
+    setHoy((respuesta) => {
+      if (!respuesta) return respuesta;
+      const ajustar = (lista: TareaHoy[]) => {
+        if (!visibleEnHoy) return lista.filter((t) => t.id !== id);
+        if (!lista.some((t) => t.id === id)) return lista;
+        return lista.map((t) => (t.id === id ? { ...t, ...cambios } : t));
+      };
+      const grupos: GruposHoy = {
+        vencidas: ajustar(respuesta.grupos.vencidas),
+        para_hoy: ajustar(respuesta.grupos.para_hoy),
+        proximas: ajustar(respuesta.grupos.proximas),
+      };
+      return {
+        ...respuesta,
+        grupos,
+        total:
+          grupos.vencidas.length + grupos.para_hoy.length + grupos.proximas.length,
+      };
+    });
+  };
+
+  /** Microcopy de confirmación según la acción que acaba de hacer el organizador. */
+  const microcopyEstado = (t: Subtarea) => {
+    if (t.estado === "hecho")
+      return `Gestión completada: «${t.titulo}» ya no pesa en la carga de hoy.`;
+    if (t.estado === "pospuesta")
+      return t.notaPospuesta?.trim()
+        ? `Gestión pospuesta: «${t.titulo}». Quedó anotado: ${t.notaPospuesta.trim()}.`
+        : `Gestión pospuesta: «${t.titulo}» salió de tu carga de hoy.`;
+    return `Gestión reabierta: «${t.titulo}» vuelve a la carga de hoy.`;
+  };
+
+  const ubicarTarea = (id: string) =>
+    eventos.flatMap((evento) =>
+      evento.subtareas.map((t) => ({ evento, tarea: t })),
+    ).find((item) => item.tarea.id === id);
 
   const crearEventoCompleto = async (
     evento: EventoPayload,
@@ -217,19 +297,144 @@ function useDatos(activo: boolean) {
       return false;
     }
     await cargarTodo(false);
-    notifySuccess("Gestión agregada.");
+    notifySuccess("Gestión agregada al plan del evento.");
     return true;
   };
-  const actualizarSubtarea = async (eId: string, t: Subtarea) => {
+  /**
+   * Envía el estado de una gestión al servidor. Si el backend todavía no
+   * reconoce "pospuesta" (400 en el campo `estado`), reintenta como "pendiente"
+   * y devuelve éxito: la posposición queda sostenida por la capa local.
+   */
+  const enviarEstado = async (
+    eId: string,
+    t: Subtarea,
+  ): Promise<{ ok: boolean; error: string }> => {
     const res = await repositorioEventos.actualizarSubtarea(eId, t);
+    if (res.ok) return { ok: true, error: "" };
+    if (res.codigo === CODIGO_ESTADO_POSPUESTA) {
+      const respaldo = await repositorioEventos.actualizarSubtarea(eId, {
+        ...t,
+        estado: "pendiente",
+      });
+      return respaldo.ok
+        ? { ok: true, error: "" }
+        : { ok: false, error: respaldo.error };
+    }
+    return { ok: false, error: res.error };
+  };
+
+  const actualizarSubtarea = async (eId: string, t: Subtarea) => {
+    // Reacción inmediata: /hoy descuenta la carga urgente sin recargar.
+    reflejarEnMemoria(
+      t.id,
+      { estado: t.estado, notaPospuesta: t.notaPospuesta ?? "" },
+      esVisibleEnHoy(t.estado),
+    );
+    if (t.estado !== "pospuesta") repositorioPospuestas.borrar(t.id);
+    const res = await enviarEstado(eId, t);
     if (!res.ok) {
       notifyError(res.error);
+      await cargarTodo(false);
       return false;
     }
     await cargarTodo(false);
-    notifySuccess("Gestión actualizada.");
+    notifySuccess(microcopyEstado(t));
     return true;
   };
+
+  /**
+   * Posponer saca la gestión de la carga urgente del día y guarda el motivo.
+   * La fecha nueva es opcional: si el organizador no la cambia, solo se mueve
+   * el estado; si la cambia, se reutiliza la reprogramación del Sprint 3 (con
+   * su control de sobrecarga) y después se manda el estado "pospuesta".
+   */
+  const posponerSubtarea = async (id: string, datos: PeticionPosponer) => {
+    const ubicacion = ubicarTarea(id);
+    if (!ubicacion) {
+      notifyError("No encontramos esa gestión para posponerla.");
+      return false;
+    }
+    const { evento, tarea } = ubicacion;
+    const nota = datos.notaPospuesta.trim();
+    const cambiaFecha = Boolean(
+      datos.fechaLimite && datos.fechaLimite !== tarea.fechaLimite,
+    );
+    const fecha = cambiaFecha ? datos.fechaLimite! : tarea.fechaLimite;
+    const hora = cambiaFecha
+      ? datos.horaLimite || tarea.horaLimite
+      : tarea.horaLimite;
+
+    // 1) Reacción inmediata en /hoy, sin esperar al servidor.
+    reflejarEnMemoria(id, { estado: "pospuesta", notaPospuesta: nota }, false);
+
+    // 2) Nueva fecha, si el organizador la cambió.
+    if (cambiaFecha) {
+      const reprogramacion = await repositorioEventos.reprogramar(id, {
+        fechaLimite: fecha,
+        horaLimite: hora,
+        estimacion: tarea.estimacion,
+      });
+      if (!reprogramacion.ok) {
+        notifyError(
+          reprogramacion.tipo === "conflicto"
+            ? `No pudimos posponer «${tarea.titulo}»: ese día supera tu límite de trabajo.`
+            : reprogramacion.error,
+        );
+        await cargarTodo(false);
+        return false;
+      }
+    }
+
+    // 3) Estado "pospuesta" + nota contra la API.
+    const actualizada: Subtarea = {
+      ...tarea,
+      estado: "pospuesta",
+      notaPospuesta: nota,
+      fechaLimite: fecha,
+      horaLimite: hora,
+    };
+    const res = await enviarEstado(evento.id, actualizada);
+    if (!res.ok) {
+      notifyError(res.error);
+      await cargarTodo(false);
+      return false;
+    }
+
+    // La capa local cubre al servidor que aún no conoce "pospuesta"/`nota_pospuesta`.
+    repositorioPospuestas.registrar(id, {
+      notaPospuesta: nota,
+      fechaLimite: fecha,
+    });
+    await cargarTodo(false);
+    notifySuccess(microcopyEstado(actualizada));
+    return true;
+  };
+
+  /** Reabrir una gestión pospuesta: vuelve a la carga del día y pierde la nota. */
+  const reactivarSubtarea = async (id: string) => {
+    const ubicacion = ubicarTarea(id);
+    if (!ubicacion) {
+      notifyError("No encontramos esa gestión para reabrirla.");
+      return false;
+    }
+    const { evento, tarea } = ubicacion;
+    repositorioPospuestas.borrar(id);
+    const actualizada: Subtarea = {
+      ...tarea,
+      estado: "pendiente",
+      notaPospuesta: "",
+    };
+    const res = await enviarEstado(evento.id, actualizada);
+    if (!res.ok) {
+      notifyError(res.error);
+      await cargarTodo(false);
+      return false;
+    }
+    await cargarTodo(false);
+    notifySuccess(microcopyEstado(actualizada));
+    return true;
+  };
+
   const eliminarSubtarea = async (_eId: string, tId: string) => {
     const res = await repositorioEventos.eliminarSubtarea(tId);
     if (!res.ok) {
@@ -237,7 +442,7 @@ function useDatos(activo: boolean) {
       return false;
     }
     await cargarTodo(false);
-    notifySuccess("Gestión eliminada.");
+    notifySuccess("Gestión eliminada del plan del evento.");
     return true;
   };
   const actualizarLimiteDiario = async (horas: number) => {
@@ -294,6 +499,15 @@ function useDatos(activo: boolean) {
     crearSubtarea,
     actualizarSubtarea,
     eliminarSubtarea,
+    posponerSubtarea,
+    reactivarSubtarea,
+    pospuestas: tareasPospuestas(eventos),
+    totalPospuestas: eventos.reduce(
+      (total, evento) =>
+        total +
+        evento.subtareas.filter((t) => t.estado === "pospuesta").length,
+      0,
+    ),
   };
 }
 
@@ -722,6 +936,7 @@ function Shell() {
           <InfoReglaPrioridad />
         </div>
         <main className="content">
+          <IndicadorPospuestas />
           {cargando ? (
             <Loading />
           ) : (
@@ -842,6 +1057,71 @@ function calcularPorcentaje(evento: Evento) {
       )
     : 0;
 }
+/** Una gestión ejecutada o pospuesta deja de contar como carga urgente de hoy. */
+function esVisibleEnHoy(estado: EstadoSubtarea) {
+  return estado !== "hecho" && estado !== "pospuesta";
+}
+
+/**
+ * Barra de progreso del evento: % exacto de gestured ejecutadas sobre el total
+ * más el conteo en texto. Se conecta al estado de las tareas, así que refleja
+ * en vivo cualquier cambio de estado.
+ */
+function BarraProgresoEvento({
+  evento,
+  compacta = false,
+}: {
+  evento: Evento;
+  compacta?: boolean;
+}) {
+  const total = evento.subtareas.length;
+  const ejecutadas = evento.subtareas.filter((t) => t.estado === "hecho").length;
+  const pospuestas = evento.subtareas.filter(
+    (t) => t.estado === "pospuesta",
+  ).length;
+  const abiertas = total - ejecutadas - pospuestas;
+  const porcentaje = calcularPorcentaje(evento);
+
+  return (
+    <div
+      className={"progress-block" + (compacta ? " compacta" : "")}
+      data-testid="progress-block"
+    >
+      {!compacta && (
+        <div className="progress-head">
+          <span className="progress-caption">Avance del plan</span>
+          <span
+            className="progress-percent tabular"
+            data-testid="progress-percentage"
+          >
+            {porcentaje}%
+          </span>
+        </div>
+      )}
+      <div
+        className="progress-track"
+        role="progressbar"
+        aria-valuenow={porcentaje}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Gestiones ejecutadas de ${evento.nombre}`}
+        data-testid="progress-bar"
+      >
+        <div className="progress-fill" style={{ width: porcentaje + "%" }} />
+      </div>
+      <div className="progress-legend tabular" data-testid="progress-count">
+        <span aria-live="polite">
+          {ejecutadas} de {total}{" "}
+          {total === 1 ? "gestión ejecutada" : "gestiones ejecutadas"}
+          {pospuestas > 0 &&
+            ` · ${pospuestas} pospuesta${pospuestas === 1 ? "" : "s"}`}
+          {abiertas > 0 &&
+            ` · ${abiertas} abierta${abiertas === 1 ? "" : "s"}`}
+        </span>
+      </div>
+    </div>
+  );
+}
 function estaVencida(tarea: { fechaLimite: string; horaLimite: string }) {
   return combinarFechaHora(tarea.fechaLimite, tarea.horaLimite) < Date.now();
 }
@@ -867,6 +1147,8 @@ function FilaTarea({
   onReprogramar,
   onEditar,
   onEliminar,
+  onPosponer,
+  onReactivar,
 }: {
   tarea: Subtarea & { eventoNombre?: string };
   mostrarEvento?: boolean;
@@ -874,15 +1156,25 @@ function FilaTarea({
   onReprogramar: () => void;
   onEditar?: () => void;
   onEliminar?: () => void;
+  onPosponer?: () => void;
+  onReactivar?: () => void;
 }) {
   const fecha = estadoFecha(tarea);
+  const pospuesta = tarea.estado === "pospuesta";
+  const nota = tarea.notaPospuesta?.trim();
   return (
-    <div className={"task-row " + fecha}>
+    <div className={"task-row " + fecha + (pospuesta ? " pospuesta" : "")}>
       <input
         className="task-check"
         type="checkbox"
         checked={tarea.estado === "hecho"}
         onChange={onToggle}
+        aria-label={
+          tarea.estado === "hecho"
+            ? `Marcar «${tarea.titulo}» como pendiente`
+            : `Marcar «${tarea.titulo}» como hecha`
+        }
+        data-testid={`task-check-${tarea.id}`}
       />
       <div className="task-main">
         <div
@@ -903,16 +1195,62 @@ function FilaTarea({
           {tarea.estado === "hecho" && (
             <span className="tag tag-done">Hecha</span>
           )}
+          {pospuesta && (
+            <span className="tag tag-pospuesta">Pospuesta</span>
+          )}
         </div>
+        {pospuesta && (
+          <div className="task-note" data-testid={`task-note-${tarea.id}`}>
+            <StickyNote size={12} className="task-note-icon" />
+            <div>
+              <span className="task-note-label">Motivo de la posposición</span>
+              <p>
+                {nota ||
+                  "Sin nota: queda anotada como pendiente hasta que tengas el dato."}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
       <div className="task-actions">
         {onEditar && (
           <button
             className="button button-small button-ghost button-icon"
             onClick={onEditar}
+            title="Editar gestión"
           >
             <Pencil size={13} />
           </button>
+        )}
+        {pospuesta ? (
+          <>
+            {onReactivar && (
+              <button
+                className="button button-small button-secondary"
+                onClick={onReactivar}
+                data-testid={`reactivar-${tarea.id}`}
+              >
+                <RotateCcw size={13} /> Reactivar
+              </button>
+            )}
+            <button
+              className="button button-small button-primary"
+              onClick={onToggle}
+              data-testid={`marcar-hecha-${tarea.id}`}
+            >
+              <Check size={13} /> Marcar hecha
+            </button>
+          </>
+        ) : (
+          onPosponer && (
+            <button
+              className="button button-small button-ghost"
+              onClick={onPosponer}
+              data-testid={`posponer-${tarea.id}`}
+            >
+              <PauseCircle size={13} /> Posponer
+            </button>
+          )
         )}
         <button
           className="button button-small button-secondary"
@@ -1123,10 +1461,41 @@ function Opciones() {
   );
 }
 
+/** Contador de posposiciones para la navegación lateral. */
+function IndicadorPospuestas() {
+  const { pospuestas } = useStore();
+  if (!pospuestas.length) return null;
+  return (
+    <Link
+      href="/hoy#pospuestas"
+      className="pospuestas-indicator"
+      title={`${pospuestas.length} ${
+        pospuestas.length === 1 ? "gestión pospuesta" : "gestiones pospuestas"
+      }`}
+      data-testid="pospuestas-indicator"
+    >
+      <PauseCircle size={12} />
+      <span>
+        {pospuestas.length}{" "}
+        {pospuestas.length === 1 ? "pospuesta" : "pospuestas"}
+      </span>
+    </Link>
+  );
+}
+
 function Hoy() {
-  const { eventos, hoy, errorCarga, refrescar, actualizarSubtarea } =
-    useStore();
+  const {
+    eventos,
+    hoy,
+    pospuestas,
+    errorCarga,
+    refrescar,
+    actualizarSubtarea,
+    posponerSubtarea,
+    reactivarSubtarea,
+  } = useStore();
   const [reprogramar, setReprogramar] = useState<Subtarea | null>(null);
+  const [posponer, setPosponer] = useState<TareaHoy | null>(null);
 
   const grupos: GruposHoy = hoy?.grupos ?? {
     vencidas: [],
@@ -1139,6 +1508,7 @@ function Hoy() {
     actualizarSubtarea(tarea.eventoId, {
       ...tarea,
       estado: tarea.estado === "hecho" ? "pendiente" : "hecho",
+      notaPospuesta: "",
     });
   };
 
@@ -1162,6 +1532,7 @@ function Hoy() {
               mostrarEvento
               onToggle={() => cambiarEstado(t)}
               onReprogramar={() => setReprogramar(t)}
+              onPosponer={() => setPosponer(t)}
             />
           ))}
         </div>
@@ -1170,6 +1541,36 @@ function Hoy() {
           {vacio}
         </div>
       )}
+    </section>
+  );
+
+  const bloquePospuestas = () => (
+    <section className="hoy-section" id="pospuestas">
+      <div className="section-head">
+        <div className="section-title-row">
+          <h2 className="section-title">Pospuestas</h2>
+          <span className="section-count">{pospuestas.length}</span>
+        </div>
+        <span className="tag tag-pospuesta">Fuera de la carga de hoy</span>
+      </div>
+      <div className="task-list">
+        {pospuestas.map((t) => (
+          <FilaTarea
+            key={t.id}
+            tarea={t}
+            mostrarEvento
+            onToggle={() =>
+              actualizarSubtarea(t.eventoId, {
+                ...t,
+                estado: "hecho",
+                notaPospuesta: "",
+              })
+            }
+            onReprogramar={() => setReprogramar(t)}
+            onReactivar={() => reactivarSubtarea(t.id)}
+          />
+        ))}
+      </div>
     </section>
   );
 
@@ -1195,16 +1596,21 @@ function Hoy() {
     );
   }
 
+  const descripcionHoy =
+    total > 0
+      ? `${total} ${total === 1 ? "gestión urgente" : "gestiones urgentes"}.`
+      : pospuestas.length
+        ? `Hoy no tienes urgencias: ${pospuestas.length} ${
+            pospuestas.length === 1 ? "gestión pospuesta" : "gestiones pospuestas"
+          }.`
+        : "El plan está despejado.";
+
   return (
     <div>
       <Encabezado
         eyebrow="Panel de control"
         titulo="Hoy"
-        descripcion={
-          total
-            ? `${total} ${total === 1 ? "gestión abierta" : "gestiones abiertas"}.`
-            : "El plan está despejado."
-        }
+        descripcion={descripcionHoy}
         accion={
           <Link href="/crear" className="button button-primary">
             <Plus size={15} /> Crear evento
@@ -1221,27 +1627,49 @@ function Hoy() {
             </Link>
           }
         />
-      ) : total === 0 ? (
-        <EmptyState
-          titulo="No hay gestiones pendientes"
-          copy="Todas las gestiones están hechas. Puedes revisar tus eventos o crear uno nuevo."
-          accion={
-            <Link href="/eventos" className="button button-secondary">
-              Ver eventos
-            </Link>
-          }
-        />
       ) : (
         <>
-          {bloque("Vencidas", grupos.vencidas, "No hay gestiones vencidas.")}
-          {bloque("Para hoy", grupos.para_hoy, "Nada vence hoy.")}
-          {bloque("Próximas", grupos.proximas, "No hay próximas gestiones.")}
+          {total === 0 && (
+            <EmptyState
+              titulo={
+                pospuestas.length
+                  ? "Hoy no tienes gestiones urgentes"
+                  : "No hay gestiones pendientes"
+              }
+              copy={
+                pospuestas.length
+                  ? "Todo lo que vencía hoy quedó hecho o pospuesto. Revisa abajo el motivo de cada posposición."
+                  : "Todas las gestiones están hechas. Puedes revisar tus eventos o crear uno nuevo."
+              }
+              accion={
+                <Link href="/eventos" className="button button-secondary">
+                  Ver eventos
+                </Link>
+              }
+            />
+          )}
+          {total > 0 && (
+            <>
+              {bloque("Vencidas", grupos.vencidas, "No hay gestiones vencidas.")}
+              {bloque("Para hoy", grupos.para_hoy, "Nada vence hoy.")}
+              {bloque("Próximas", grupos.proximas, "No hay próximas gestiones.")}
+            </>
+          )}
+          {pospuestas.length > 0 && bloquePospuestas()}
         </>
       )}
       {reprogramar && (
         <ReprogramarDialog
           tarea={reprogramar}
           onClose={() => setReprogramar(null)}
+        />
+      )}
+      {posponer && (
+        <PosponerDialog
+          tarea={posponer}
+          evento={eventos.find((e) => e.id === posponer.eventoId)}
+          onClose={() => setPosponer(null)}
+          onConfirm={(datos) => posponerSubtarea(posponer.id, datos)}
         />
       )}
     </div>
@@ -2065,12 +2493,15 @@ function DetalleEvento() {
     eliminarEvento,
     crearSubtarea,
     actualizarEvento,
+    posponerSubtarea,
+    reactivarSubtarea,
   } = useStore();
   const [, setLocation] = useLocation();
   const evento = eventos.find((e) => e.id === id);
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null);
   const [mover, setMover] = useState<Subtarea | null>(null);
+  const [posponer, setPosponer] = useState<Subtarea | null>(null);
   const [editarEvento, setEditarEvento] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState<{
     tipo: "evento" | "tarea";
@@ -2095,6 +2526,7 @@ function DetalleEvento() {
     await actualizarSubtarea(evento.id, {
       ...tarea,
       estado: tarea.estado === "hecho" ? "pendiente" : "hecho",
+      notaPospuesta: tarea.estado === "hecho" ? tarea.notaPospuesta : "",
     });
   const eliminar = async (tarea: Subtarea) => {
     setConfirmarEliminar({ tipo: "tarea", id: tarea.id, nombre: tarea.titulo });
@@ -2117,7 +2549,10 @@ function DetalleEvento() {
     }
   };
 
-  const pendientes = evento.subtareas.filter((t) => t.estado !== "hecho");
+  const pospuestas = evento.subtareas.filter((t) => t.estado === "pospuesta");
+const abiertas = evento.subtareas.filter(
+    (t) => t.estado !== "hecho" && t.estado !== "pospuesta",
+  );
   const completadas = evento.subtareas.filter((t) => t.estado === "hecho");
   const porcentaje = calcularPorcentaje(evento);
   return (
@@ -2130,14 +2565,27 @@ function DetalleEvento() {
           <h1 className="detail-title">{evento.nombre}</h1>
           <p className="page-description" style={{ marginTop: 6 }}>
             {formatoHoras(evento.horasPlanificadas)} h de trabajo planificadas ·{" "}
-            {pendientes.length}{" "}
-            {pendientes.length === 1 ? "gestión abierta" : "gestiones abiertas"}
+            {abiertas.length}{" "}
+            {abiertas.length === 1
+              ? "gestión abierta"
+              : "gestiones abiertas"}
+            {pospuestas.length > 0 &&
+              ` · ${pospuestas.length} pospuesta${
+                pospuestas.length === 1 ? "" : "s"
+              }`}
           </p>
         </div>
         <div className="detail-score">
           <div className="score-number">{porcentaje}%</div>
+          <div className="score-label">del plan ejecutado</div>
         </div>
       </div>
+      <section
+        className="card card-pad detail-progress"
+        aria-label="Progreso del evento"
+      >
+        <BarraProgresoEvento evento={evento} />
+      </section>
       <div className="detail-actions">
         <button
           className="button button-primary"
@@ -2206,6 +2654,14 @@ function DetalleEvento() {
           onClose={() => setMover(null)}
         />
       )}
+      {posponer && (
+        <PosponerDialog
+          tarea={posponer}
+          evento={evento}
+          onClose={() => setPosponer(null)}
+          onConfirm={(datos) => posponerSubtarea(posponer.id, datos)}
+        />
+      )}
       <div className="detail-layout">
         <section>
           {mostrarAgregar && (
@@ -2230,9 +2686,9 @@ function DetalleEvento() {
               />
             </div>
           )}
-          {pendientes.length ? (
+          {abiertas.length ? (
             <div className="task-list">
-              {pendientes.map((t) => (
+              {abiertas.map((t) => (
                 <FilaTarea
                   key={t.id}
                   tarea={t}
@@ -2240,14 +2696,39 @@ function DetalleEvento() {
                   onReprogramar={() => setMover(t)}
                   onEditar={() => setTareaEditar(t)}
                   onEliminar={() => eliminar(t)}
+                  onPosponer={() => setPosponer(t)}
                 />
               ))}
             </div>
           ) : (
             <EmptyState
               titulo="Plan despejado"
-              copy="No hay gestiones pendientes."
+              copy="No hay gestiones abiertas en este evento."
             />
+          )}
+          {pospuestas.length > 0 && (
+            <>
+              <div className="section-head">
+                <div className="section-title-row">
+                  <h2 className="section-title">Pospuestas</h2>
+                  <span className="section-count">{pospuestas.length}</span>
+                </div>
+                <span className="tag tag-pospuesta">Fuera de la carga de hoy</span>
+              </div>
+              <div className="task-list">
+                {pospuestas.map((t) => (
+                  <FilaTarea
+                    key={t.id}
+                    tarea={t}
+                    onToggle={() => toggle(t)}
+                    onReprogramar={() => setMover(t)}
+                    onEditar={() => setTareaEditar(t)}
+                    onEliminar={() => eliminar(t)}
+                    onReactivar={() => reactivarSubtarea(t.id)}
+                  />
+                ))}
+              </div>
+            </>
           )}
           {completadas.length > 0 && (
             <div className="task-list">
@@ -3118,6 +3599,178 @@ function ReprogramarDialog({
   );
 }
 
+/**
+ * Diálogo de posposición: aparta la gestión de la carga urgente del día y deja
+ * a la vista el motivo. La nueva fecha es opcional; si se cambia, se reutiliza
+ * la reprogramación del Sprint 3 (con su control de sobrecarga diaria).
+ */
+function PosponerDialog({
+  tarea,
+  evento,
+  onClose,
+  onConfirm,
+}: {
+  tarea: Subtarea & { eventoId?: string };
+  evento?: Evento;
+  onClose: () => void;
+  onConfirm: (datos: PeticionPosponer) => Promise<boolean>;
+}) {
+  const { eventos, limiteDiario } = useStore();
+  const [nota, setNota] = useState("");
+  const [fecha, setFecha] = useState(tarea.fechaLimite);
+  const [hora, setHora] = useState(tarea.horaLimite);
+  const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const cambiaFecha = fecha !== tarea.fechaLimite;
+  // El servidor rechaza cualquier plazo posterior al inicio del evento.
+  const fechaMaxima = evento?.fechaInicio;
+
+  useEffect(() => {
+    const cerrarConEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !guardando) onClose();
+    };
+    window.addEventListener("keydown", cerrarConEscape);
+    return () => window.removeEventListener("keydown", cerrarConEscape);
+  }, [guardando, onClose]);
+
+  const confirmar = async (e: FormEvent) => {
+    e.preventDefault();
+    if (cambiaFecha && fechaMaxima && fecha > fechaMaxima) {
+      setError(
+        `La gestión no puede quedar con plazo después del inicio del evento (${fechaBonita(fechaMaxima, true)}).`,
+      );
+      return;
+    }
+    if (cambiaFecha && evento) {
+      const problema = validarCapacidadesTarea(
+        eventos,
+        evento.id,
+        { ...tarea, estado: "pospuesta", fechaLimite: fecha },
+        limiteDiario,
+        tarea.id,
+      );
+      if (problema) {
+        setError(problema);
+        return;
+      }
+    }
+    setGuardando(true);
+    setError("");
+    const ok = await onConfirm({
+      notaPospuesta: nota,
+      fechaLimite: cambiaFecha ? fecha : undefined,
+      horaLimite: cambiaFecha ? hora : undefined,
+    });
+    setGuardando(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={onClose}>
+      <form
+        className="dialog posponer-dialog"
+        onSubmit={confirmar}
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="posponer-titulo"
+        noValidate
+      >
+        <div className="dialog-head">
+          <div>
+            <div className="eyebrow">POSPONER GESTIÓN</div>
+            <h2 className="dialog-title" id="posponer-titulo">
+              {tarea.titulo}
+            </h2>
+            <p>
+              Deja de contar en la carga de hoy y queda anotada como pendiente
+              hasta que la reabras.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="button button-ghost button-small button-icon"
+            onClick={onClose}
+            aria-label="Cerrar"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        <div className="dialog-body">
+          <div className="field">
+            <label htmlFor="posponer-nota">Motivo de la posposición</label>
+            <textarea
+              id="posponer-nota"
+              data-testid="posponer-nota"
+              value={nota}
+              onChange={(e) => setNota(e.target.value)}
+              placeholder="ej. esperando confirmación de salón"
+            />
+            <small className="field-hint">
+              Opcional. Queda a la vista en la lista hasta que la reabras.
+            </small>
+          </div>
+          <div className="form-grid posponer-dates">
+            <div className="field">
+              <label htmlFor="posponer-fecha">Nueva fecha límite (opcional)</label>
+              <input
+                id="posponer-fecha"
+                data-testid="posponer-fecha"
+                type="date"
+                max={fechaMaxima}
+                value={fecha}
+                onChange={(e) => {
+                  setFecha(e.target.value);
+                  setError("");
+                }}
+              />
+              <small className="field-hint">
+                {cambiaFecha
+                  ? `Se mueve a ${fechaBonita(fecha, true)}${fechaMaxima ? ` (máx. inicio del evento: ${fechaBonita(fechaMaxima, true)})` : ""}.`
+                  : "Déjala igual si solo quieres sacarla de la carga de hoy."}
+              </small>
+            </div>
+            <div className="field">
+              <label htmlFor="posponer-hora">Hora límite</label>
+              <input
+                id="posponer-hora"
+                data-testid="posponer-hora"
+                type="time"
+                value={hora}
+                disabled={!cambiaFecha}
+                onChange={(e) => setHora(e.target.value)}
+              />
+            </div>
+          </div>
+          {error && (
+            <div className="error-box" role="alert" data-testid="posponer-error">
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="form-actions">
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={onClose}
+            disabled={guardando}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={guardando}
+            data-testid="posponer-confirmar"
+          >
+            <PauseCircle size={14} /> {guardando ? "Posponiendo…" : "Posponer gestión"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function Progreso() {
   const { eventos } = useStore();
   if (!eventos.length)
@@ -3143,6 +3796,9 @@ function Progreso() {
 
   const porcentajeGlobal =
     totalTareas === 0 ? 0 : Math.round((tareasCompletadas / totalTareas) * 100);
+  const tareasPospuestasTotal = todasTareas.filter(
+    (t) => t.estado === "pospuesta",
+  ).length;
 
   return (
     <div>
@@ -3226,6 +3882,29 @@ function Progreso() {
                 </span>
               </div>
             </div>
+            <div className="card card-pad">
+              <div
+                style={{
+                  color: "var(--apagado)",
+                  fontSize: "12px",
+                  marginBottom: "10px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  fontWeight: 500,
+                }}
+              >
+                Gestiones Pospuestas
+              </div>
+              <div
+                style={{
+                  fontSize: "42px",
+                  color: "var(--ambar)",
+                  fontWeight: 300,
+                }}
+              >
+                {tareasPospuestasTotal}
+              </div>
+            </div>
           </div>
           <h3
             style={{
@@ -3246,7 +3925,7 @@ function Progreso() {
                   key={e.id}
                   className="task-row"
                   style={{
-                    gridTemplateColumns: "minmax(0,1fr) auto",
+                    gridTemplateColumns: "minmax(0,1fr) minmax(210px, 280px)",
                     padding: "16px 20px",
                     cursor: "pointer",
                     textDecoration: "none",
@@ -3263,20 +3942,17 @@ function Progreso() {
                     >
                       {e.nombre}
                     </div>
-                    <div style={{ fontSize: "13px", color: "var(--apagado)" }}>
-                      {e.subtareas.filter((t) => t.estado === "hecho").length}{" "}
-                      de {e.subtareas.length} gestiones completadas
+                    <div
+                      style={{
+                        fontSize: "24px",
+                        color: p === 100 ? "var(--salvia)" : "#e0e0e0",
+                        fontWeight: 300,
+                      }}
+                    >
+                      {p}%
                     </div>
                   </div>
-                  <div
-                    style={{
-                      fontSize: "24px",
-                      color: p === 100 ? "var(--salvia)" : "#e0e0e0",
-                      fontWeight: 300,
-                    }}
-                  >
-                    {p}%
-                  </div>
+                  <BarraProgresoEvento evento={e} compacta />
                 </Link>
               );
             })}

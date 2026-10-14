@@ -1,6 +1,10 @@
-import { api, mensajeDeError } from "@/services/api";
+import { api, mensajeDeError, obtenerToken } from "@/services/api";
 
-export type EstadoSubtarea = "pendiente" | "en_progreso" | "hecho";
+export type EstadoSubtarea =
+  | "pendiente"
+  | "en_progreso"
+  | "hecho"
+  | "pospuesta";
 export type Prioridad = "alta" | "media" | "baja";
 
 export type Subtarea = {
@@ -13,6 +17,8 @@ export type Subtarea = {
   horaLimite: string;
   horaInicio?: string;
   estimacion: number;
+  /** Motivo de la posposición ("pospuesta"). Vacío cuando no aplica. */
+  notaPospuesta?: string;
 };
 
 export type FechaSugerida = {
@@ -69,7 +75,27 @@ export type EventoPayload = Omit<
   "id" | "subtareas" | "creadoEn" | "horasPlanificadas"
 >;
 
-export type Resultado<T> = { ok: true; data: T } | { ok: false; error: string };
+/**
+ * Fallo de una operación. `codigo` permite reaccionar a causas concretas sin
+ * parsear el mensaje (por ejemplo, un servidor que aún no conoce un estado).
+ */
+export type Resultado<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; codigo?: string };
+
+/** Código de fallo: el servidor rechazó el estado "pospuesta" en el campo `estado`. */
+export const CODIGO_ESTADO_POSPUESTA = "ESTADO_POSPUESTA_NO_SOPORTADO";
+
+/**
+ * Detecta el 400 de DRF cuando el campo `estado` no acepta todavía el valor
+ * "pospuesta" (`{"estado": ["\"pospuesta\" is not a valid choice."]}`).
+ */
+export function esEstadoPospuestaRechazado(error: any): boolean {
+  const datos = error?.response?.data;
+  if (!datos || error?.response?.status !== 400) return false;
+  const texto = JSON.stringify(datos).toLowerCase();
+  return texto.includes("pospuesta") && texto.includes("estado");
+}
 
 function hoy(): string {
   const fecha = new Date();
@@ -138,6 +164,7 @@ function mapSubtareaFromApi(t: any): Subtarea {
     horaLimite: t.hora_limite.slice(0, 5),
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
+    notaPospuesta: t.nota_pospuesta ?? "",
   };
 }
 
@@ -191,6 +218,9 @@ function mapSubtareaToApi(eventoId: string, t: Omit<Subtarea, "id">) {
     plazo: t.fechaLimite,
     hora_limite: t.horaLimite,
     hora_inicio: t.horaInicio || null,
+    // Un servidor que aún no tenga el campo simplemente lo ignora (DRF descarta
+    // las claves no declaradas), así que enviarlo nunca rompe la petición.
+    nota_pospuesta: t.notaPospuesta ?? "",
   };
 }
 
@@ -286,6 +316,9 @@ export const repositorioEventos = {
         error: e.response?.data
           ? JSON.stringify(e.response.data)
           : "Error al actualizar gestión.",
+        codigo: esEstadoPospuestaRechazado(e)
+          ? CODIGO_ESTADO_POSPUESTA
+          : undefined,
       };
     }
   },
@@ -455,6 +488,7 @@ function mapTareaHoyFromApi(t: any): TareaHoy {
     horaLimite: t.hora_limite.slice(0, 5),
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
+    notaPospuesta: t.nota_pospuesta ?? "",
     eventoId: t.evento.id.toString(),
     eventoNombre: t.evento.nombre,
   };
@@ -490,3 +524,156 @@ export const repositorioHoy = {
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// Capa local de posposiciones (Sprint 4)
+// ---------------------------------------------------------------------------
+// El estado "pospuesta" viaja a la API, pero el servidor se despliega por
+// detrás: mientras no acepte ese valor (400 en el campo `estado`) o no exponga
+// `nota_pospuesta`, la posposición se guarda en el navegador. Cuando el backend
+// lo soporte, la capa deja de intervenir porque el servidor ya devuelve el
+// estado final. Se aísla por cuenta con el token de sesión, igual que los datos
+// de la cuenta.
+
+const CLAVE_POSPUESTAS = "eventops_pospuestas";
+
+export type Pospusion = {
+  estado: "pospuesta";
+  notaPospuesta: string;
+  fechaLimite?: string;
+  registradaEn: string;
+};
+export type CapaPospuestas = Record<string, Pospusion>;
+
+function clavePospuestas(): string {
+  const token = obtenerToken();
+  return token ? `${CLAVE_POSPUESTAS}_${token}` : "";
+}
+
+export const repositorioPospuestas = {
+  leer(): CapaPospuestas {
+    const clave = clavePospuestas();
+    if (!clave) return {};
+    try {
+      const crudo = localStorage.getItem(clave);
+      if (!crudo) return {};
+      const datos = JSON.parse(crudo) as Record<string, any>;
+      if (!datos || typeof datos !== "object") return {};
+      const capa: CapaPospuestas = {};
+      for (const [id, valor] of Object.entries(datos)) {
+        if (valor?.estado !== "pospuesta") continue;
+        capa[id] = {
+          estado: "pospuesta",
+          notaPospuesta:
+            typeof valor.notaPospuesta === "string" ? valor.notaPospuesta : "",
+          fechaLimite:
+            typeof valor.fechaLimite === "string" ? valor.fechaLimite : undefined,
+          registradaEn:
+            typeof valor.registradaEn === "string" ? valor.registradaEn : "",
+        };
+      }
+      return capa;
+    } catch {
+      return {};
+    }
+  },
+
+  escribir(capa: CapaPospuestas) {
+    const clave = clavePospuestas();
+    if (!clave) return;
+    try {
+      if (!Object.keys(capa).length) localStorage.removeItem(clave);
+      else localStorage.setItem(clave, JSON.stringify(capa));
+    } catch {
+      // Navegación privada o cuota llena: la posposición sigue viva en el estado
+      // de la sesión, solo se pierde al recargar.
+    }
+  },
+
+  registrar(tareaId: string, datos: { notaPospuesta: string; fechaLimite?: string }) {
+    const capa = repositorioPospuestas.leer();
+    capa[tareaId] = {
+      estado: "pospuesta",
+      notaPospuesta: datos.notaPospuesta.trim(),
+      fechaLimite: datos.fechaLimite,
+      registradaEn: new Date().toISOString(),
+    };
+    repositorioPospuestas.escribir(capa);
+  },
+
+  borrar(tareaId: string) {
+    const capa = repositorioPospuestas.leer();
+    if (!(tareaId in capa)) return;
+    delete capa[tareaId];
+    repositorioPospuestas.escribir(capa);
+  },
+};
+
+/**
+ * Mezcla la capa local sobre los eventos del servidor.
+ *
+ * Regla: "hecho" siempre gana (el servidor es la fuente de la verdad para lo
+ * cerrado); si la capa dice "pospuesta" y el servidor solo conoce
+ * pendiente/en progreso, se aplica la capa. Si el servidor ya devuelve
+ * "pospuesta", la nota es la del servidor y la capa no interviene.
+ */
+export function aplicarCapaPospuestas(
+  eventos: Evento[],
+  capa: CapaPospuestas,
+): Evento[] {
+  if (!Object.keys(capa).length) return eventos;
+  let cambio = false;
+  const actualizados = eventos.map((evento) => {
+    let cambioEvento = false;
+    const subtareas = evento.subtareas.map((tarea) => {
+      const pospusion = capa[tarea.id];
+      if (!pospusion) return tarea;
+      if (tarea.estado === "hecho" || tarea.estado === "pospuesta") return tarea;
+      cambioEvento = true;
+      return {
+        ...tarea,
+        estado: "pospuesta" as EstadoSubtarea,
+        notaPospuesta: pospusion.notaPospuesta,
+      };
+    });
+    if (!cambioEvento) return evento;
+    cambio = true;
+    return { ...evento, subtareas };
+  });
+  return cambio ? actualizados : eventos;
+}
+
+/**
+ * Saca de la vista /hoy las gestiones pospuestas y recalcula el total, de modo
+ * que la carga urgente baja en el acto, sin recargar la página.
+ */
+export function filtrarHoyPorPospuestas(
+  respuesta: RespuestaHoy,
+  capa: CapaPospuestas,
+): RespuestaHoy {
+  if (!Object.keys(capa).length) return respuesta;
+  const esPospuesta = (tarea: TareaHoy) => Boolean(capa[tarea.id]);
+  const grupos: GruposHoy = {
+    vencidas: respuesta.grupos.vencidas.filter((t) => !esPospuesta(t)),
+    para_hoy: respuesta.grupos.para_hoy.filter((t) => !esPospuesta(t)),
+    proximas: respuesta.grupos.proximas.filter((t) => !esPospuesta(t)),
+  };
+  return {
+    ...respuesta,
+    total: grupos.vencidas.length + grupos.para_hoy.length + grupos.proximas.length,
+    grupos,
+  };
+}
+
+/** Gestiones pospuestas de todos los eventos, listas para pintarlas en la UI. */
+export function tareasPospuestas(eventos: Evento[]): TareaHoy[] {
+  return eventos.flatMap((evento) =>
+    evento.subtareas
+      .filter((t) => t.estado === "pospuesta")
+      .map((t) => ({
+        ...t,
+        eventoId: evento.id,
+        eventoNombre: evento.nombre,
+      })),
+  );
+}
