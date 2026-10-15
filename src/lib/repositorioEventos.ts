@@ -1,7 +1,10 @@
-import { api, mensajeDeError } from "@/services/api";
+﻿import { api, mensajeDeError } from "@/services/api";
 
 export type EstadoSubtarea = "pendiente" | "en_progreso" | "hecho";
 export type Prioridad = "alta" | "media" | "baja";
+
+/** Clasificación que calcula el servidor para los filtros de /eventos. */
+export type EstadoAgenda = "activo" | "pasado" | "retrasado" | "cancelado";
 
 export type Subtarea = {
   id: string;
@@ -13,6 +16,8 @@ export type Subtarea = {
   horaLimite: string;
   horaInicio?: string;
   estimacion: number;
+  /** Motivo del último movimiento (opcional). */
+  motivoMovimiento?: string;
 };
 
 export type FechaSugerida = {
@@ -59,6 +64,10 @@ export type Evento = {
   notas: string;
   capacidadDiaria: number;
   horasPlanificadas: number;
+  /** Un evento cancelado deja de generar trabajo pendiente. */
+  cancelado: boolean;
+  /** Clasificación del servidor; se recalcula en el cliente si aún no viene. */
+  estadoAgenda: EstadoAgenda;
   subtareas: Subtarea[];
   creadoEn: string;
 };
@@ -66,10 +75,19 @@ export type Evento = {
 /** Datos editables de un evento (lo que se envía al API). */
 export type EventoPayload = Omit<
   Evento,
-  "id" | "subtareas" | "creadoEn" | "horasPlanificadas"
+  "id" | "subtareas" | "creadoEn" | "horasPlanificadas" | "estadoAgenda"
 >;
 
-export type Resultado<T> = { ok: true; data: T } | { ok: false; error: string };
+/**
+ * Fallo de una operación. `codigo` permite reaccionar a causas concretas sin
+ * parsear el mensaje (por ejemplo, un servidor que aún no conoce un campo).
+ */
+export type Resultado<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; codigo?: string };
+
+/** Código de fallo: el servidor rechazó un dato que aún no conoce. */
+export const CODIGO_DATOS_NO_SOPORTADOS = "DATOS_NO_SOPORTADOS";
 
 function hoy(): string {
   const fecha = new Date();
@@ -110,6 +128,17 @@ export function generarId(prefijo: string): string {
 }
 
 // Funciones de mapeo
+/**
+ * Réplica local de `EventoSerializer.get_estado_agenda`. Solo se usa si el
+ * servidor todavía no envía `estado_agenda`; cuando llega, manda el servidor.
+ */
+function calcularEstadoAgenda(e: any, fechaInicio: string): EstadoAgenda {
+  if (e.cancelado) return "cancelado";
+  if (diferenciaDias(hoyISO(), fechaInicio) >= 0) return "activo";
+  const abiertas = (e.subtareas || []).filter((t: any) => t.estado !== "hecho");
+  return abiertas.length ? "retrasado" : "pasado";
+}
+
 function mapEventoFromApi(e: any): Evento {
   return {
     id: e.id.toString(),
@@ -123,6 +152,8 @@ function mapEventoFromApi(e: any): Evento {
     notas: e.notas_produccion || "",
     capacidadDiaria: Number(e.limite_diario_horas),
     horasPlanificadas: Number(e.horas_planificadas ?? 0),
+    cancelado: Boolean(e.cancelado),
+    estadoAgenda: e.estado_agenda ?? calcularEstadoAgenda(e, e.fecha_inicio),
     creadoEn: e.creado_en ? e.creado_en.slice(0, 10) : hoyISO(),
     subtareas: (e.subtareas || []).map(mapSubtareaFromApi),
   };
@@ -138,6 +169,7 @@ function mapSubtareaFromApi(t: any): Subtarea {
     horaLimite: t.hora_limite.slice(0, 5),
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
+    motivoMovimiento: t.motivo_movimiento ?? "",
   };
 }
 
@@ -177,6 +209,7 @@ function mapEventoToApi(e: EventoPayload) {
     duracion_horas: e.duracion,
     limite_diario_horas: e.capacidadDiaria,
     notas_produccion: e.notas,
+    cancelado: e.cancelado,
   };
 }
 
@@ -191,7 +224,13 @@ function mapSubtareaToApi(eventoId: string, t: Omit<Subtarea, "id">) {
     plazo: t.fechaLimite,
     hora_limite: t.horaLimite,
     hora_inicio: t.horaInicio || null,
+    motivo_movimiento: t.motivoMovimiento ?? "",
   };
+}
+
+/** Traduce el fallo del servidor a un mensaje que pueda leer el organizador. */
+function errorDe(e: any, porDefecto: string): string {
+  return e.response?.data ? mensajeDeError(e.response.data) : porDefecto;
 }
 
 export const repositorioEventos = {
@@ -215,12 +254,7 @@ export const repositorioEventos = {
       const response = await api.post("/eventos/", mapEventoToApi(evento));
       return { ok: true, data: mapEventoFromApi(response.data) };
     } catch (e: any) {
-      return {
-        ok: false,
-        error: e.response?.data
-          ? JSON.stringify(e.response.data)
-          : "Error al crear evento.",
-      };
+      return { ok: false, error: errorDe(e, "No se pudo crear el evento.") };
     }
   },
 
@@ -232,12 +266,7 @@ export const repositorioEventos = {
       const response = await api.put(`/eventos/${id}/`, mapEventoToApi(evento));
       return { ok: true, data: mapEventoFromApi(response.data) };
     } catch (e: any) {
-      return {
-        ok: false,
-        error: e.response?.data
-          ? JSON.stringify(e.response.data)
-          : "Error al actualizar evento.",
-      };
+      return { ok: false, error: errorDe(e, "No se pudo actualizar el evento.") };
     }
   },
 
@@ -246,7 +275,7 @@ export const repositorioEventos = {
       await api.delete(`/eventos/${id}/`);
       return { ok: true, data: true };
     } catch (e: any) {
-      return { ok: false, error: "Error al eliminar evento." };
+      return { ok: false, error: errorDe(e, "No se pudo eliminar el evento.") };
     }
   },
 
@@ -261,12 +290,7 @@ export const repositorioEventos = {
       );
       return { ok: true, data: mapSubtareaFromApi(response.data) };
     } catch (e: any) {
-      return {
-        ok: false,
-        error: e.response?.data
-          ? JSON.stringify(e.response.data)
-          : "Error al crear gestión.",
-      };
+      return { ok: false, error: errorDe(e, "No se pudo crear la gestión.") };
     }
   },
 
@@ -281,24 +305,25 @@ export const repositorioEventos = {
       );
       return { ok: true, data: mapSubtareaFromApi(response.data) };
     } catch (e: any) {
-      return {
-        ok: false,
-        error: e.response?.data
-          ? JSON.stringify(e.response.data)
-          : "Error al actualizar gestión.",
-      };
+      return { ok: false, error: errorDe(e, "No se pudo actualizar la gestión.") };
     }
   },
 
   async reprogramar(
     id: string,
-    cambios: { fechaLimite: string; horaLimite: string; estimacion: number },
+    cambios: {
+      fechaLimite: string;
+      horaLimite: string;
+      estimacion: number;
+      motivoMovimiento?: string;
+    },
   ): Promise<ResultadoReprogramacion> {
     try {
       const response = await api.patch(`/subtareas/${id}/reprogramar/`, {
         plazo: cambios.fechaLimite,
         hora_limite: cambios.horaLimite,
         estimacion_horas: cambios.estimacion,
+        motivo_movimiento: cambios.motivoMovimiento ?? "",
       });
       return { ok: true, data: mapSubtareaFromApi(response.data) };
     } catch (e: any) {
@@ -312,9 +337,10 @@ export const repositorioEventos = {
       return {
         ok: false,
         tipo: "error",
-        error: e.response?.data
-          ? mensajeDeError(e.response.data)
-          : "No se pudo reprogramar la gestión. Revisa tu conexión e inténtalo de nuevo.",
+        error: errorDe(
+          e,
+          "No se pudo mover la gestión. Revisa tu conexión e inténtalo de nuevo.",
+        ),
       };
     }
   },
@@ -349,9 +375,10 @@ export const repositorioEventos = {
     } catch (e: any) {
       return {
         ok: false,
-        error: e.response?.data
-          ? mensajeDeError(e.response.data)
-          : "No se pudo resolver el conflicto. Revisa tu conexión e inténtalo de nuevo.",
+        error: errorDe(
+          e,
+          "No se pudo resolver el conflicto. Revisa tu conexión e inténtalo de nuevo.",
+        ),
       };
     }
   },
@@ -361,7 +388,7 @@ export const repositorioEventos = {
       await api.delete(`/subtareas/${id}/`);
       return { ok: true, data: true };
     } catch (e: any) {
-      return { ok: false, error: "Error al eliminar gestión." };
+      return { ok: false, error: errorDe(e, "No se pudo eliminar la gestión.") };
     }
   },
 };
@@ -412,16 +439,32 @@ export function tareasGlobales(eventos: Evento[]) {
 }
 
 export function hoursToTime(h: number): string {
-  if (!h) return "00:00";
+  if (!h || !Number.isFinite(h) || h <= 0) return "00:00";
   const m = Math.round(h * 60);
   const hh = Math.floor(m / 60);
   const mm = m % 60;
   return hh.toString().padStart(2, "0") + ":" + mm.toString().padStart(2, "0");
 }
+
+/** ¿El texto tiene forma HH:MM y representa una cantidad de horas válida? */
+export function esHorasValidas(texto: string, maximoHoras = 24): boolean {
+  if (!/^\d{1,2}:\d{2}$/.test(texto.trim())) return false;
+  const horas = timeToHours(texto);
+  return Number.isFinite(horas) && horas > 0 && horas <= maximoHoras;
+}
+
+/**
+ * Convierte "HH:MM" a horas. Devuelve 0 (nunca `NaN`) si el texto no tiene
+ * forma HH:MM, para que una entrada inválida no acabe traveling al servidor.
+ */
 export function timeToHours(t: string): number {
-  if (!t) return 0;
-  const parts = t.split(":");
-  return Number((parseInt(parts[0]) + parseInt(parts[1]) / 60).toFixed(2));
+  const partes = (t || "").trim().split(":");
+  if (partes.length !== 2) return 0;
+  const [hh, mm] = partes.map((p) => parseInt(p, 10));
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || mm < 0 || mm > 59) {
+    return 0;
+  }
+  return Number((hh + mm / 60).toFixed(2));
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +498,7 @@ function mapTareaHoyFromApi(t: any): TareaHoy {
     horaLimite: t.hora_limite.slice(0, 5),
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
+    motivoMovimiento: t.motivo_movimiento ?? "",
     eventoId: t.evento.id.toString(),
     eventoNombre: t.evento.nombre,
   };
@@ -490,3 +534,4 @@ export const repositorioHoy = {
     }
   },
 };
+

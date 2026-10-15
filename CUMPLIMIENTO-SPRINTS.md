@@ -1,8 +1,8 @@
 # Cumplimiento de criterios por Sprint — Frontend
 
 Este documento describe, para el repositorio **Frontend-Eventos-PI**, todo lo que ya está
-implementado en relación con los criterios de los sprints 0, 1, 2 y 3. Las ramas de trabajo han sido
-`feature/sprint-hoy-wiring` y `feature/sprint3-capacidad-conflictos`.
+implementado en relación con los criterios de los sprints 0, 1, 2, 3 y 4. Las ramas de trabajo han sido
+`feature/sprint-hoy-wiring`, `feature/sprint3-capacidad-conflictos` y `feature/sprint4-estado-tareas`.
 
 El backend que consume está en **Backend-Eventos-PI** (`feature/sprint-auth-hoy`,
 `feat/backend-limites-horas` y `feature/sprint3-capacidad-conflictos`), documentado en su propio
@@ -200,9 +200,123 @@ el Documento Único):
 
 ---
 
-## Estado del código
+## Sprint 4 — Estado de tareas (Hecha / Pospuesta) y barra de progreso
 
-- `npm run typecheck` y `npm run build` pasan sin errores.
+### C1 — Marcar cada gestión como "Hecha" o "Pospuesta"
+
+La fila de gestión (`FilaTarea`, en `src/App.tsx`) suma dos acciones por tarea, sin quitar ninguna de
+las que ya existían (checkbox de completada, **Mover**, **Editar**, **Eliminar**):
+
+| Acción | Botón | Efecto |
+| --- | --- | --- |
+| Completar | **Marcar hecha** / checkbox | `estado: "hecho"` contra `PUT /api/subtareas/{id}/`. Deja de contar en la carga urgente de hoy. |
+| Posponer | **Posponer** | Abre `PosponerDialog` → `estado: "pospuesta"` + `nota_pospuesta` + fecha nueva opcional. |
+| Reabrir | **Reactivar** | Vuelve a `estado: "pendiente"` y borra la nota. |
+
+La lista quedó separada en tres bloques por estado, cada uno con su encabezado y contador:
+
+- **Abiertas** (`pendiente` / `en_progreso`) — `/evento/:id`.
+- **Pospuestas** — bloque propio en `/hoy` y en `/evento/:id`, con la etiqueta *"Fuera de la carga de
+  hoy"*.
+- **Completadas** (`hecho`) — sin cambios respecto al Sprint 3.
+
+Accesibilidad: los botones llevan `aria-label` en el checkbox, `title` en los de icono y
+`data-testid` estables (`task-check-{id}`, `posponer-{id}`, `marcar-hecha-{id}`, `reactivar-{id}`,
+`task-note-{id}`).
+
+### C2 — Barra de progreso del evento
+
+Componente reutilizable **`BarraProgresoEvento`** (`src/App.tsx`), montado en las dos rutas pedidas:
+
+| Ruta | Dónde | Presentación |
+| --- | --- | --- |
+| `/evento/:id` | Tarjeta `detail-progress`, bajo el encabezado | Barra completa: rótulo **Avance del plan**, % grande y leyenda de conteo. |
+| `/progreso` | Columna derecha de cada fila de *Desglose por Evento* | Versión `compacta`: barra + leyenda (el % grande ya está a la izquierda). |
+
+- **Porcentaje exacto**: `ejecutadas / total` redondeado (`calcularPorcentaje`, `src/App.tsx`), es
+  decir, solo cuenta como avance lo que está en `hecho`; lo pospuesto no infla el avance.
+- **Conteo en texto**: *"3 de 7 gestiones ejecutadas · 1 pospuesta · 3 abiertas"*, con
+  `aria-live="polite"` para que el lector de pantalla anuncie el cambio.
+- Accesibilidad: `role="progressbar"` con `aria-valuenow/valuemin/valuemax` y `aria-label` con el
+  nombre del evento.
+- **Conexión al estado**: lee `eventos[].subtareas` del store, que se actualiza con el parche
+  optimista y luego con la respuesta del servidor. Cambiar cualquier tarea mueve la barra al
+  instante, sin recargar.
+
+### C3 — Reactividad de `/hoy` sin recargar la página
+
+El store aplica un **parche optimista** (`reflejarEnMemoria`, `src/App.tsx`) antes de llamar a la API:
+al completar o posponer, la gestión sale del grupo correspondiente y el `total` se recalcula en el
+mismo tick de render.
+
+- Sin parpadeo: no se activa el esqueleto de carga (se usa `cargarTodo(false)`).
+- Si la petición falla, el estado real se restaura con una recarga silenciosa y se avisa con un toast.
+- `/hoy` sigue alimentándose de `GET /api/hoy/`; la capa local (`aplicarCapaPospuestas` +
+  `filtrarHoyPorPospuestas`) solo filtra lo que el servidor todavía no conoce.
+
+### C4 — Nota opcional de posposición y microcopy
+
+**La nota se ve siempre.** Al posponer se abre `PosponerDialog` con:
+
+- Campo de texto **"Motivo de la posposición"** (`posponer-nota`), con la pista
+  *"ej. esperando confirmación de salón"*.
+- **Nueva fecha límite opcional** (`posponer-fecha` / `posponer-hora`): si no se toca, solo se mueve el
+  estado; si se cambia, se reutiliza `PATCH /api/subtareas/{id}/reprogramar/` del Sprint 3 y su
+  validación de sobrecarga diaria. El `max` del date es la fecha de inicio del evento, que es el límite
+  que el servidor impone.
+
+La nota se muestra en un bloque `.task-note` (icono `StickyNote`, rótulo *"Motivo de la posposición"*)
+en cada fila pospuesta de `/hoy` y de `/evento/:id`, y el botón **Reactivar** acompaña a la fila.
+
+**Microcopy de confirmación** (`microcopyEstado`, `src/App.tsx`), en lugar de mensajes genéricos:
+
+| Acción | Toast |
+| --- | --- |
+| Completar | *"Gestión completada: «Confirmar salón» ya no pesa en la carga de hoy."* |
+| Posponer con nota | *"Gestión pospuesta: «Confirmar salón». Quedó anotado: esperando confirmación de salón."* |
+| Posponer sin nota | *"Gestión pospuesta: «Confirmar salón» salió de tu carga de hoy."* |
+| Reabrir | *"Gestión reabierta: «Confirmar salón» vuelve a la carga de hoy."* |
+
+Se ajustaron además los mensajes de crear y eliminar gestión (*"… al plan del evento"*). Encima del
+contenido aparece un indicador **"N pospuestas"** (`pospuestas-indicator`) que enlaza al bloque
+`#pospuestas` de `/hoy`.
+
+### Contrato de API y capa local de respaldo
+
+El backend desplegado (`Backend-Eventos-PI`) todavía **no conoce `pospuesta` ni `nota_pospuesta`**: su
+modelo `Subtarea.OPCIONES_ESTADO` es `pendiente | en_progreso | hecho` y el serializer rechaza valores
+fuera de esas opciones. El frontend se escribió contra el contrato final y degrada sin romperse:
+
+1. Se envía `estado: "pospuesta"` y `nota_pospuesta` en el `PUT` de la subtarea.
+2. Si el servidor responde **400** en el campo `estado`, se detecta con `esEstadoPospuestaRechazado`
+   y se reintenta automáticamente como `pendiente` (`enviarEstado`, `src/App.tsx`).
+3. La posposición y su nota quedan en `repositorioPospuestas`, una capa en `localStorage` **aislada por
+   cuenta** (clave `eventops_pospuestas_<token>`), que se aplica en cada carga con
+   `aplicarCapaPospuestas` (eventos) y `filtrarHoyPorPospuestas` (vista de hoy).
+4. Cuando el backend incorpore `pospuesta` / `nota_pospuesta`, la capa deja de intervenir de forma
+   automática: el servidor pasa a ser la fuente de verdad y **no hay que tocar la UI**.
+
+La capa cubre solo el estado que el servidor aún no expone, en línea con el criterio de no duplicar
+en el cliente lo que el backend calcula (`horasPlanificadas`, Sprint 3).
+
+### Archivos y rutas modificados
+
+| Archivo | Cambios del Sprint 4 |
+| --- | --- |
+| `src/lib/repositorioEventos.ts` | `EstadoSubtarea` suma `"pospuesta"`; `Subtarea` suma `notaPospuesta`; `Resultado` suma `codigo`; `mapSubtareaToApi` / `mapSubtareaFromApi` / `mapTareaHoyFromApi` con `nota_pospuesta`; nuevos `CODIGO_ESTADO_POSPUESTA`, `esEstadoPospuestaRechazado`, `repositorioPospuestas`, `aplicarCapaPospuestas`, `filtrarHoyPorPospuestas`, `tareasPospuestas`. |
+| `src/App.tsx` | Store: `posponerSubtarea`, `reactivarSubtarea`, `enviarEstado`, `reflejarEnMemoria`, `microcopyEstado`, `esVisibleEnHoy`, `pospuestas`/`totalPospuestas`, capa aplicada en `cargarTodo`. Componentes: `BarraProgresoEvento`, `PosponerDialog`, `IndicadorPospuestas`, `FilaTarea` ampliada, `Hoy` con bloque de pospuestas, `DetalleEvento` con barra y separación por estado, `Progreso` con barra por evento y tarjeta de pospuestas. |
+| `src/index.css` | `.tag-pospuesta`, `.task-row.pospuesta`, `.task-note`, `.progress-block/.progress-head/.progress-percent/.progress-legend`, `.detail-progress`, `.pospuestas-indicator`, `.posponer-dialog`, `.posponer-dates` y sus reglas móviles. Todo aditivo: no se modificó ninguna clase existente. |
+
+### Verificación realizada
+
+| Comprobación | Resultado |
+| --- | --- |
+| `npm run typecheck` | 0 errores. |
+| `npm run build` | Compila sin advertencias. |
+| Suite del backend (`python manage.py test`) | 43 pruebas, OK (sin regresiones). |
+| Contrato real contra el backend desplegado | `PUT` con `estado: "pospuesta"` → **400** `{"estado": ["\"pospuesta\" no es una elección válida."]}`; el detector lo identifica y el reintento como `pendiente` responde **200**. El campo `nota_pospuesta` extra es **ignorado** por el serializer actual (no rompe la petición). |
+| Lógica de la capa local (11 comprobaciones) | Todas en verde: capa vacía inocua, `hecho` del servidor gana, la nota del servidor gana cuando ya la expone, `/hoy` recalcula el total, persistencia aislada por cuenta, y `esEstadoPospuestaRechazado` discrimina el 400 real de otros errores (409 de sobrecarga, 500, otros 400). |
+| Pipeline completo con datos del servidor | `/hoy`: 5 → 4 urgently, grupo "Para hoy" 1 → 0; bloque Pospuestas con su nota; barra *1 de 6 · 1 pospuesta · 4 abiertas (17%)*; ninguna pospuesta queda en `/hoy` y todas tienen nota visible. |
 - Limpieza de código muerto: se eliminaron los componentes shadcn sin uso, hooks y utilidades sin
   referencias, scripts de parcheo de un solo uso y capturas; `package.json` quedó con las
   dependencias reales.
@@ -210,7 +324,105 @@ el Documento Único):
 
 ## Pendientes y evidencia externa
 
+- Backend: agregar `pospuesta` a `Subtarea.OPCIONES_ESTADO` y el campo `nota_pospuesta` al modelo.
+  El frontend ya envía ambos y deja de usar la capa local en cuanto el servidor los devuelve.
+- Recorrido visual en navegador (aún pendiente de captura): crear evento con plan → `/hoy` →
+  **Posponer** con nota → la fila sale del grupo y el total baja al instante → la nota aparece en el
+  bloque **Pospuestas** → **Reactivar** la devuelve al día → `/evento/:id` muestra la barra y el bloque
+  → `/progreso` refleja el mismo porcentaje.
 - Tablero Kanban (To Do/Doing/Done) y bitácora UX/HCI: se evidencian en el Documento Único.
 - Recuperación de contraseña: la pantalla existe, pero avisa que el restablecimiento lo hace el
   administrador (no hay servicio de correo en el alcance).
 - Despliegue del frontend: definir `VITE_API_URL` con la URL del backend en producción.
+
+---
+
+## Sprint 5 — Restricciones, formularios y mensajes
+
+Trabajo sobre el frontend existente: se reutilizaron los componentes, tokens y patrones ya
+presentes en lugar de introducir librerías nuevas. **El backend se amplió en tres puntos** que el
+frontend leía pero nunca recibía (`horas_planificadas`, `motivo_movimiento`, estado de evento
+cancelado); se documentan en el `CUMPLIMIENTO-SPRINTS.md` del backend.
+
+### 1. Se eliminó la opción «Posponer»
+
+El backend nunca la admitió: `Subtarea.OPCIONES_ESTADO` es `pendiente | en_progreso | hecho` y
+el campo `nota_pospuesta` no existía, así que la posposición se sostenía con una capa en
+`localStorage` y un reintento al recibir un 400. Al retirar la interfaz se retiraron también esa
+capa y ese reintento.
+
+| Se eliminó | Dónde |
+| --- | --- |
+| `PosponerDialog` y el botón «Posponer» de cada fila | `src/App.tsx` |
+| Bloque «Pospuestas» de `/hoy` y del detalle del evento | `src/App.tsx` |
+| `IndicadorPospuestas` sobre el contenido | `src/App.tsx` |
+| Tarjeta «Gestiones Pospuestas» de `/progreso` | `src/App.tsx` |
+| `repositorioPospuestas`, `aplicarCapaPospuestas`, `filtrarHoyPorPospuestas`, `tareasPospuestas`, `CODIGO_ESTADO_POSPUESTA`, `esEstadoPospuestaRechazado` y el estado `"pospuesta"` | `src/lib/repositorioEventos.ts` |
+| `.tag-pospuesta`, `.task-row.pospuesta`, `.posponer-dialog`, `.posponer-dates`, `.pospuestas-indicator` | `src/index.css` |
+
+El resto de opciones de gestión (mover, editar, eliminar, marcar hecha) se conservan sin cambios.
+
+### 2. Componentes reutilizables nuevos
+
+Están en `src/App.tsx` y se usan en todos los formularios, para que no haya dos versiones del
+mismo control:
+
+| Componente | Dónde se usa | Qué resuelve |
+| --- | --- | --- |
+| `CampoHoras` | Plan inicial, agregar/editar gestión, mover, diálogo de conflicto | Un único campo de horas estimado en `HH:MM` con máscara, ayuda y mensaje de error. |
+| `CampoDuracion` | Crear evento, editar evento | Desplegable de duraciones válidas (30 min a 24 h) que siempre incluye el valor actual. |
+| `IndicadorHoras` | `/hoy`, detalle del evento, `/opciones` | Un único mensaje «X h planificadas … de Y h», con el exceso cuando se pasa. |
+| `ErrorCampo` | Todos los formularios | Mensaje de error con `id` para `aria-describedby`. |
+
+### 3. Validaciones visibles que antes no existían
+
+| Regla | Antes | Ahora |
+| --- | --- | --- |
+| Plazo de una gestión ≤ inicio del evento | Sin validación; el servidor respondía 400 con el JSON crudo | `max` en el campo, recorte automático al mover el inicio, y el mensaje «No puede ser posterior al inicio del evento (…).» junto al campo. |
+| Fecha de fin ≥ fecha de inicio | Mensaje «Inválida.» | `min` en el campo, la fecha de fin sigue sola al inicio y el mensaje completo. |
+| Duración del evento | `pattern` que el navegador no aplicaba (`noValidate`); `NaN` pasaba la validación | Desplegable con opciones válidas, rango 30 min–24 h y mensaje. |
+| Límite diario | Cliente 1–16 h, servidor hasta 24 h | Cliente 1–24 h, igual que el servidor. |
+| Filtros de `/eventos` | «Cancelados» y «Retrasados» siempre vacíos con el mensaje «No hay eventos activos» | Filtros sobre `estado_agenda` del servidor, con mensaje propio por filtro. |
+
+### 4. Motivo opcional al mover una gestión
+
+`ReprogramarDialog` («Mover gestión») incorpora el campo **Motivo del cambio**, opcional, con
+ayuda y sin validación que lo vuelva obligatorio. Se envía como `motivo_movimiento` en
+`PATCH /api/subtareas/<id>/reprogramar/` y el backend ya lo persiste, así que se muestra en la
+fila de la gestión como nota.
+
+### 5. Estabilidad de la casilla de tarea
+
+`.task-check` heredaba `padding: 10px 11px` del `input` genérico y se centraba con
+`align-items: center` en un grid; al marcar, la fila crecía (etiqueta «Hecha») y la casilla se
+recentraba. Ahora la caja es fija (`18×18`, `padding: 0`, `flex: 0 0 auto`,
+`justify-self: center`, `align-self: start`) y `:checked` solo cambia colores y el tamaño fijo del
+trazo. Además, **la gestión completada ya no cambia de bloque**: se queda en su sitio con
+`.task-row.done`, tachado y la etiqueta «Hecha».
+
+### 6. Mensajes
+
+- `mensajeDeError` ya no devuelve un `\n` literal y traduce los nombres de campo del API
+  (`plazo` → «Fecha límite», `duracion_horas` → «Duración», …). Los repositorios dejaron de
+  volcar el `JSON` crudo de DRF al usuario.
+- Se retiró `input:invalid:not(:placeholder-shown)`: con `!important` pintaba campos en rojo
+  antes de escribir y pisaba el estado real. Ahora la validez la marcan `.error` y
+  `aria-invalid`; los formularios de login, registro y recuperación también llevan `noValidate`.
+- Formato común `<Acción>: «<título>».` para crear, actualizar, eliminar, mover y completar.
+- El toast de error usa `role="alert"` y el de éxito `role="status"`.
+
+### 7. Accesibilidad
+
+Todos los campos de los formularios tocados tienen `id` + `htmlFor`, `aria-invalid` y
+`aria-describedby` apuntando a su error o a su ayuda. Los botones de icono que solo tenían
+`title` llevan también `aria-label`. El diálogo de Mover declara `role="dialog"`,
+`aria-modal` y cierra con `Escape`.
+
+### Verificación
+
+| Comprobación | Resultado |
+| --- | --- |
+| `npm run typecheck` | 0 errores. |
+| `npm run build` | Compila sin advertencias. |
+| `python manage.py test` (backend) | 54 pruebas, OK. |
+| Recorrido visual en navegador | **No automatizado**: este repo no tiene arnés de pruebas de UI ni navegador disponible en el entorno, de modo que la revisión de los escenarios (fechas inválidas, plazo fuera de rango, límite diario, motivo vacío y con texto, desplazamiento de la casilla, responsive) se hizo por revisión estática de estilos y de estados, no pulsando la interfaz. |

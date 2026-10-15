@@ -1,4 +1,4 @@
-import {
+﻿import {
   createContext,
   useContext,
   useEffect,
@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  Ban,
   CalendarDays,
   Check,
   ChevronRight,
@@ -41,6 +42,7 @@ import NotFound from "@/pages/not-found";
 import { useAuth } from "./Root";
 import {
   combinarFechaHora,
+  esHorasValidas,
   hoursToTime,
   timeToHours,
   diferenciaDias,
@@ -80,7 +82,12 @@ type Store = {
   actualizarLimiteDiario: (horas: number) => Promise<string | null>;
   reprogramarSubtarea: (
     id: string,
-    cambios: { fechaLimite: string; horaLimite: string; estimacion: number },
+    cambios: {
+      fechaLimite: string;
+      horaLimite: string;
+      estimacion: number;
+      motivoMovimiento?: string;
+    },
   ) => Promise<ResultadoReprogramacion>;
   resolverConflictoSubtarea: (
     id: string,
@@ -166,6 +173,56 @@ function useDatos(activo: boolean) {
   const notifySuccess = (msg: string) =>
     setAviso({ tipo: "success", texto: msg });
 
+  /**
+   * Refleja el cambio de una gestión en memoria, antes de que responda el
+   * servidor: /hoy descuenta la carga urgente al instante y las barras de
+   * progreso se mueven sin recargar la página. Si la petición falla, el
+   * `cargarTodo(false)` del error deja el estado real otra vez.
+   */
+  const reflejarEnMemoria = (
+    id: string,
+    cambios: Partial<Subtarea>,
+    visibleEnHoy: boolean,
+  ) => {
+    setEventos((lista) =>
+      lista.map((evento) => ({
+        ...evento,
+        subtareas: evento.subtareas.map((t) =>
+          t.id === id ? { ...t, ...cambios } : t,
+        ),
+      })),
+    );
+    setHoy((respuesta) => {
+      if (!respuesta) return respuesta;
+      const ajustar = (lista: TareaHoy[]) => {
+        if (!visibleEnHoy) return lista.filter((t) => t.id !== id);
+        if (!lista.some((t) => t.id === id)) return lista;
+        return lista.map((t) => (t.id === id ? { ...t, ...cambios } : t));
+      };
+      const grupos: GruposHoy = {
+        vencidas: ajustar(respuesta.grupos.vencidas),
+        para_hoy: ajustar(respuesta.grupos.para_hoy),
+        proximas: ajustar(respuesta.grupos.proximas),
+      };
+      return {
+        ...respuesta,
+        grupos,
+        total:
+          grupos.vencidas.length + grupos.para_hoy.length + grupos.proximas.length,
+      };
+    });
+  };
+
+  /** Microcopy de confirmación según la acción que acaba de hacer el organizador. */
+  const microcopyEstado = (t: Subtarea, hechos: number, total: number) => {
+    if (t.estado !== "hecho")
+      return `Gestión reabierta: «${t.titulo}» vuelve a la carga de hoy.`;
+    const plural = hechos === 1 ? "1 gestión ejecutada" : `${hechos} gestiones ejecutadas`;
+    return total > 1
+      ? `Gestión completada: «${t.titulo}». ${plural} de ${total}.`
+      : `Gestión completada: «${t.titulo}».`;
+  };
+
   const crearEventoCompleto = async (
     evento: EventoPayload,
     tareas: Omit<Subtarea, "id">[],
@@ -183,10 +240,14 @@ function useDatos(activo: boolean) {
     await cargarTodo(false);
     if (fallidas.length) {
       notifyError(
-        `El evento se creó, pero no se pudieron guardar ${fallidas.length} gestión(es): ${fallidas.join(", ")}.`,
+        `El evento se creó, pero ${fallidas.length} de tus gestiones no se pudieron guardar: ${fallidas.join(", ")}.`,
       );
     } else {
-      notifySuccess("Evento y plan inicial guardados.");
+      notifySuccess(
+        tareas.length
+          ? `Evento creado con ${tareas.length} ${tareas.length === 1 ? "gestión" : "gestiones"} en el plan.`
+          : "Evento creado.",
+      );
     }
     return res.data.id;
   };
@@ -197,7 +258,7 @@ function useDatos(activo: boolean) {
       return false;
     }
     await cargarTodo(false);
-    notifySuccess("Evento actualizado.");
+    notifySuccess(`Evento actualizado: «${res.data.nombre}».`);
     return true;
   };
   const eliminarEvento = async (id: string) => {
@@ -217,19 +278,33 @@ function useDatos(activo: boolean) {
       return false;
     }
     await cargarTodo(false);
-    notifySuccess("Gestión agregada.");
+    notifySuccess(`Gestión agregada al plan: «${t.titulo.trim()}».`);
     return true;
   };
+
   const actualizarSubtarea = async (eId: string, t: Subtarea) => {
+    // Reacción inmediata: /hoy descuenta la carga urgente sin recargar.
+    reflejarEnMemoria(t.id, { estado: t.estado }, esVisibleEnHoy(t.estado));
     const res = await repositorioEventos.actualizarSubtarea(eId, t);
     if (!res.ok) {
       notifyError(res.error);
+      await cargarTodo(false);
       return false;
     }
+    const todas = eventos
+      .flatMap((e) => e.subtareas)
+      .map((x) => (x.id === t.id ? t : x));
     await cargarTodo(false);
-    notifySuccess("Gestión actualizada.");
+    notifySuccess(
+      microcopyEstado(
+        t,
+        todas.filter((x) => x.estado === "hecho").length,
+        todas.length,
+      ),
+    );
     return true;
   };
+
   const eliminarSubtarea = async (_eId: string, tId: string) => {
     const res = await repositorioEventos.eliminarSubtarea(tId);
     if (!res.ok) {
@@ -237,7 +312,7 @@ function useDatos(activo: boolean) {
       return false;
     }
     await cargarTodo(false);
-    notifySuccess("Gestión eliminada.");
+    notifySuccess("Gestión eliminada del plan.");
     return true;
   };
   const actualizarLimiteDiario = async (horas: number) => {
@@ -248,13 +323,18 @@ function useDatos(activo: boolean) {
   };
   const reprogramarSubtarea = async (
     id: string,
-    cambios: { fechaLimite: string; horaLimite: string; estimacion: number },
+    cambios: {
+      fechaLimite: string;
+      horaLimite: string;
+      estimacion: number;
+      motivoMovimiento?: string;
+    },
   ) => {
     const res = await repositorioEventos.reprogramar(id, cambios);
     if (res.ok) {
       await cargarTodo(false);
       notifySuccess(
-        `Fecha actualizada: la gestión se movió al ${fechaHoraBonita(cambios.fechaLimite)}.`,
+        `Gestión movida al ${fechaHoraBonita(cambios.fechaLimite, cambios.horaLimite)}.`,
       );
     }
     return res;
@@ -479,11 +559,8 @@ function Shell() {
   const { eventos, hoy, cargando } = useStore();
   const [location, setLocation] = useLocation();
   const retrasadas = hoy?.grupos.vencidas.length ?? 0;
-  const activos = eventos.filter(
-    (e) =>
-      diferenciaDias(hoyISO(), e.fechaInicio) >= 0 ||
-      e.subtareas.some((t) => t.estado !== "hecho"),
-  ).length;
+  // Un evento cancelado deja de generar trabajo, así que no cuenta como activo.
+  const activos = eventos.filter((e) => !e.cancelado && estaActivo(e)).length;
   const [eventoActivo, setEventoActivo] = useState("");
   const navegarEvento = (id: string) => {
     setEventoActivo(id);
@@ -536,7 +613,6 @@ function Shell() {
           <Plus size={16} strokeWidth={1.7} />
           <span>Crear evento</span>
         </Link>
-        <div className="sidebar-footer" style={{ border: "none" }}></div>
         <div
           style={{
             marginTop: "auto",
@@ -708,11 +784,7 @@ function Shell() {
           >
             <option value="">Consultar eventos…</option>
             {eventos
-              .filter(
-                (e) =>
-                  diferenciaDias(hoyISO(), e.fechaInicio) >= 0 ||
-                  e.subtareas.some((t) => t.estado !== "hecho"),
-              )
+              .filter((e) => !e.cancelado && estaActivo(e))
               .map((evento) => (
                 <option key={evento.id} value={evento.id}>
                   {evento.nombre}
@@ -762,33 +834,39 @@ function Loading() {
 function Feedback() {
   const { aviso, quitarAviso } = useStore();
   if (!aviso) return null;
+  const esError = aviso.tipo === "error";
   return (
     <div
-      className="toast"
-      role="status"
-      style={
-        aviso.tipo === "error"
-          ? {
-              background: "#45261f",
-              borderColor: "rgba(209,81,47,.55)",
-              color: "#f0b4a5",
-            }
-          : undefined
-      }
+      className={"toast" + (esError ? " toast-error" : "")}
+      // Un error se anuncia de inmediato; la confirmación espera su turno.
+      role={esError ? "alert" : "status"}
+      aria-live={esError ? "assertive" : "polite"}
+      data-testid="toast"
     >
-      {aviso.texto}
+      <span>{aviso.texto}</span>
       <button
         onClick={quitarAviso}
-        style={{
-          background: "none",
-          border: 0,
-          color: "inherit",
-          float: "right",
-          padding: 0,
-        }}
+        aria-label="Cerrar aviso"
+        title="Cerrar aviso"
+        className="toast-close"
       >
         <X size={14} />
       </button>
+    </div>
+  );
+}
+
+/** Mensaje de validación pegado a su campo, con id para aria-describedby. */
+function ErrorCampo({
+  id,
+  children,
+}: {
+  id?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="field-error" id={id}>
+      {children}
     </div>
   );
 }
@@ -842,6 +920,76 @@ function calcularPorcentaje(evento: Evento) {
       )
     : 0;
 }
+/** Una gestión ejecutada deja de contar como carga urgente de hoy. */
+function esVisibleEnHoy(estado: EstadoSubtarea) {
+  return estado !== "hecho";
+}
+/** Réplica de `estado_agenda` del servidor, para no depender del round-trip. */
+function estaActivo(evento: Evento) {
+  return (
+    evento.estadoAgenda === "activo" ||
+    evento.estadoAgenda === "retrasado" ||
+    (!evento.cancelado &&
+      (diferenciaDias(hoyISO(), evento.fechaInicio) >= 0 ||
+        evento.subtareas.some((t) => t.estado !== "hecho")))
+  );
+}
+
+/**
+ * Barra de progreso del evento: % exacto de gestured ejecutadas sobre el total
+ * más el conteo en texto. Se conecta al estado de las tareas, así que refleja
+ * en vivo cualquier cambio de estado.
+ */
+function BarraProgresoEvento({
+  evento,
+  compacta = false,
+}: {
+  evento: Evento;
+  compacta?: boolean;
+}) {
+  const total = evento.subtareas.length;
+  const ejecutadas = evento.subtareas.filter((t) => t.estado === "hecho").length;
+  const abiertas = total - ejecutadas;
+  const porcentaje = calcularPorcentaje(evento);
+
+  return (
+    <div
+      className={"progress-block" + (compacta ? " compacta" : "")}
+      data-testid="progress-block"
+    >
+      {!compacta && (
+        <div className="progress-head">
+          <span className="progress-caption">Avance del plan</span>
+          <span
+            className="progress-percent tabular"
+            data-testid="progress-percentage"
+          >
+            {porcentaje}%
+          </span>
+        </div>
+      )}
+      <div
+        className="progress-track"
+        role="progressbar"
+        aria-valuenow={porcentaje}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Gestiones ejecutadas de ${evento.nombre}`}
+        data-testid="progress-bar"
+      >
+        <div className="progress-fill" style={{ width: porcentaje + "%" }} />
+      </div>
+      <div className="progress-legend tabular" data-testid="progress-count">
+        <span aria-live="polite">
+          {ejecutadas} de {total}{" "}
+          {total === 1 ? "gestión ejecutada" : "gestiones ejecutadas"}
+          {abiertas > 0 &&
+            ` · ${abiertas} abierta${abiertas === 1 ? "" : "s"}`}
+        </span>
+      </div>
+    </div>
+  );
+}
 function estaVencida(tarea: { fechaLimite: string; horaLimite: string }) {
   return combinarFechaHora(tarea.fechaLimite, tarea.horaLimite) < Date.now();
 }
@@ -876,18 +1024,24 @@ function FilaTarea({
   onEliminar?: () => void;
 }) {
   const fecha = estadoFecha(tarea);
+  const hecha = tarea.estado === "hecho";
+  const motivo = tarea.motivoMovimiento?.trim();
   return (
-    <div className={"task-row " + fecha}>
+    <div className={"task-row " + fecha + (hecha ? " done" : "")}>
       <input
         className="task-check"
         type="checkbox"
-        checked={tarea.estado === "hecho"}
+        checked={hecha}
         onChange={onToggle}
+        aria-label={
+          hecha
+            ? `Marcar «${tarea.titulo}» como pendiente`
+            : `Marcar «${tarea.titulo}» como hecha`
+        }
+        data-testid={`task-check-${tarea.id}`}
       />
       <div className="task-main">
-        <div
-          className={"task-title" + (tarea.estado === "hecho" ? " done" : "")}
-        >
+        <div className={"task-title" + (hecha ? " done" : "")}>
           {tarea.titulo}
         </div>
         <div className="task-meta">
@@ -900,16 +1054,24 @@ function FilaTarea({
           {tarea.estado === "en_progreso" && (
             <span className="tag tag-urgent">En curso</span>
           )}
-          {tarea.estado === "hecho" && (
-            <span className="tag tag-done">Hecha</span>
-          )}
+          {hecha && <span className="tag tag-done">Hecha</span>}
         </div>
+        {motivo && (
+          <div className="task-note" data-testid={`task-note-${tarea.id}`}>
+            <div>
+              <span className="task-note-label">Motivo del movimiento</span>
+              <p>{motivo}</p>
+            </div>
+          </div>
+        )}
       </div>
       <div className="task-actions">
         {onEditar && (
           <button
             className="button button-small button-ghost button-icon"
             onClick={onEditar}
+            title="Editar gestión"
+            aria-label={`Editar «${tarea.titulo}»`}
           >
             <Pencil size={13} />
           </button>
@@ -917,13 +1079,27 @@ function FilaTarea({
         <button
           className="button button-small button-secondary"
           onClick={onReprogramar}
+          data-testid={`mover-${tarea.id}`}
+          title="Mover gestión"
         >
           <Clock3 size={13} /> Mover
         </button>
+        {hecha && (
+          <button
+            className="button button-small button-ghost"
+            onClick={onToggle}
+            data-testid={`reabrir-${tarea.id}`}
+            title="Marcar como pendiente"
+          >
+            Reabrir
+          </button>
+        )}
         {onEliminar && (
           <button
             className="button button-small button-danger button-icon"
             onClick={onEliminar}
+            title="Eliminar gestión"
+            aria-label={`Eliminar «${tarea.titulo}»`}
           >
             <Trash2 size={13} />
           </button>
@@ -973,6 +1149,7 @@ function sumarHorasAbiertas(
       sumaEventos +
       evento.subtareas.reduce((sumaTareas, tarea) => {
         if (
+          evento.cancelado ||
           tarea.estado === "hecho" ||
           tarea.fechaLimite !== fecha ||
           (excluir?.eventoId === evento.id && excluir.tareaId === tarea.id)
@@ -983,6 +1160,187 @@ function sumarHorasAbiertas(
     0,
   );
   return Number((otrasHoras + horasDeTareaMovida).toFixed(2));
+}
+
+// ---------------------------------------------------------------------------
+// Controles compartidos: un solo formato de horas, un solo selector de duración
+// y un solo mensaje de capacidad, reutilizados por todos los formularios.
+// ---------------------------------------------------------------------------
+
+/** Máximo diario que acepta el servidor (ConfiguracionOrganizadorSerializer). */
+const LIMITE_DIARIO_MAXIMO = 24;
+/** Duraciones que ofrece el desplegable, de 30 minutos a un día completo. */
+const DURACIONES = [
+  "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30", "04:00",
+  "04:30", "05:00", "06:00", "07:00", "08:00", "10:00", "12:00", "24:00",
+];
+const DURACION_MINIMA = "00:30";
+
+/** "4 h" / "4,5 h" a partir de un texto HH:MM. */
+function textoDuracion(horas: string): string {
+  const h = timeToHours(horas);
+  return `${formatoHoras(h)} h`;
+}
+
+/**
+ * Mensaje único de capacidad: «X h planificadas [hoy|de trabajo planificado]
+ * de Y h», con el exceso cuando se pasa del límite.
+ */
+function IndicadorHoras({
+  horas,
+  limite,
+  alcance,
+  testId,
+}: {
+  horas: number;
+  limite: number;
+  /** "hoy" para la carga del día; "evento" para el total del evento. */
+  alcance: "hoy" | "evento";
+  testId?: string;
+}) {
+  const exceso = horas - limite;
+  return (
+    <div
+      className={
+        "horas-chip" + (exceso > 0 ? " over" : "") + (alcance === "hoy" ? " en-cabecera" : "")
+      }
+      data-testid={testId}
+      aria-live="polite"
+    >
+      <Clock3 size={13} className="horas-chip-icon" aria-hidden="true" />
+      <span className="horas-chip-texto">
+        <strong>{formatoHoras(horas)} h</strong>{" "}
+        {alcance === "hoy"
+          ? "planificadas hoy"
+          : "de trabajo planificado"}{" "}
+        de <strong>{formatoHoras(limite)} h</strong>
+      </span>
+      {exceso > 0 && (
+        <span className="horas-chip-exceso">
+          Te pasas por {formatoHoras(exceso)} h
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Campo de horas estimado. Un único control HH:MM para el plan inicial, para
+ * agregar/editar una gestión y para moverla: mismo formato y mismos mensajes.
+ */
+function CampoHoras({
+  id,
+  valor,
+  onChange,
+  error,
+  testId,
+  etiqueta = "Horas estimadas",
+  requerido = true,
+}: {
+  id: string;
+  valor: string;
+  onChange: (valor: string) => void;
+  error?: string;
+  testId?: string;
+  etiqueta?: string;
+  requerido?: boolean;
+}) {
+  const ayudaId = `${id}-ayuda`;
+  const errorId = `${id}-error`;
+  return (
+    <div className="field">
+      <label htmlFor={id}>
+        {etiqueta} {requerido && <span className="req">*</span>}
+      </label>
+      {error && <ErrorCampo id={errorId}>{error}</ErrorCampo>}
+      <div className="horas-input">
+        <input
+          id={id}
+          data-testid={testId}
+          type="text"
+          inputMode="numeric"
+          placeholder="00:00"
+          maxLength={5}
+          value={valor}
+          className={error ? "error" : ""}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : ayudaId}
+          onChange={(e) => onChange(normalizarHoras(e.target.value))}
+          onBlur={() => {
+            if (valor.includes(":") && !esHorasValidas(valor)) {
+              onChange(hoursToTime(timeToHours(valor)));
+            }
+          }}
+        />
+        <span aria-hidden="true">h</span>
+      </div>
+      <small className="field-hint" id={ayudaId}>
+        Horas y minutos, en formato HH:MM. Mínimo 30 minutos.
+      </small>
+    </div>
+  );
+}
+
+/** Escribe ":" solo y deja el texto en HH:MM sin dejar campos vacíos. */
+function normalizarHoras(texto: string): string {
+  const digitos = texto.replace(/\D/g, "").slice(0, 4);
+  if (digitos.length <= 2) return digitos;
+  return `${digitos.slice(0, 2)}:${digitos.slice(2)}`;
+}
+
+/**
+ * Selector de duración del evento. Es un desplegable con opciones válidas, y
+ * siempre incluye el valor actual para no perderlo al tocar el resto del
+ * formulario.
+ */
+function CampoDuracion({
+  id,
+  valor,
+  onChange,
+  error,
+  limiteDiario,
+  testId,
+}: {
+  id: string;
+  valor: string;
+  onChange: (valor: string) => void;
+  error?: string;
+  limiteDiario: number;
+  testId?: string;
+}) {
+  const errorId = `${id}-error`;
+  const ayudaId = `${id}-ayuda`;
+  const opciones = DURACIONES.includes(valor) ? DURACIONES : [valor, ...DURACIONES];
+  return (
+    <div className="field">
+      <label htmlFor={id}>
+        Duración <span className="req">*</span>
+      </label>
+      {error && <ErrorCampo id={errorId}>{error}</ErrorCampo>}
+      <select
+        id={id}
+        data-testid={testId}
+        value={valor}
+        className={error ? "error" : ""}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? errorId : ayudaId}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {opciones.map((opcion) => (
+          <option key={opcion} value={opcion}>
+            {textoDuracion(opcion)}
+            {opcion === valor && !DURACIONES.includes(valor)
+              ? " (actual)"
+              : ""}
+          </option>
+        ))}
+      </select>
+      <small className="field-hint" id={ayudaId}>
+        Entre 30 minutos y {LIMITE_DIARIO_MAXIMO} h. Tu límite diario de trabajo
+        es {formatoHoras(limiteDiario)} h.
+      </small>
+    </div>
+  );
 }
 
 function ConfiguracionCapacidadDiaria({
@@ -1006,8 +1364,11 @@ function ConfiguracionCapacidadDiaria({
   const guardarLimite = async (event: FormEvent) => {
     event.preventDefault();
     const numero = Number(borrador);
-    if (!/^\d+$/.test(borrador.trim()) || numero < 1 || numero > 16) {
-      setError("El límite debe ser un número entero entre 1 y 16 horas.");
+    // El servidor acepta de 1 a 24 h: el cliente no inventa un tope más bajo.
+    if (!/^\d+$/.test(borrador.trim()) || numero < 1 || numero > LIMITE_DIARIO_MAXIMO) {
+      setError(
+        `El límite diario debe ser un número entero entre 1 y ${LIMITE_DIARIO_MAXIMO} horas.`,
+      );
       setGuardado(false);
       return;
     }
@@ -1032,23 +1393,16 @@ function ConfiguracionCapacidadDiaria({
         <div className="eyebrow">OPCIONES DE LA CUENTA</div>
         <h2 id="daily-capacity-title">Límite diario de trabajo</h2>
         <p>
-          Define cuántas horas de gestiones abiertas puedes planificar por día.
-          El sistema usa este límite para avisarte cuando reprogramar una
-          gestión produciría una sobrecarga.
+          Define cuántas horas de gestiones puedes planificar por día. El sistema
+          usa este límite para avisarte cuando mover una gestión produciría una
+          sobrecarga.
         </p>
-        <div
-          className={`daily-capacity-total${carga > limiteDiario ? " over" : ""}`}
-          data-testid="daily-capacity-total"
-          aria-live="polite"
-        >
-          <strong>{formatoHoras(carga)} h</strong> planificadas hoy de{" "}
-          <strong>{formatoHoras(limiteDiario)} h</strong>
-          {carga > limiteDiario && (
-            <span>
-              Se supera el límite por {formatoHoras(carga - limiteDiario)} h.
-            </span>
-          )}
-        </div>
+        <IndicadorHoras
+          horas={carga}
+          limite={limiteDiario}
+          alcance="hoy"
+          testId="daily-capacity-total"
+        />
       </div>
       <form className="daily-capacity-form" onSubmit={guardarLimite} noValidate>
         <div className="field">
@@ -1059,7 +1413,7 @@ function ConfiguracionCapacidadDiaria({
               data-testid="daily-capacity-input"
               type="number"
               min={1}
-              max={16}
+              max={LIMITE_DIARIO_MAXIMO}
               step={1}
               value={borrador}
               aria-invalid={Boolean(error)}
@@ -1075,8 +1429,8 @@ function ConfiguracionCapacidadDiaria({
             <span>horas</span>
           </div>
           <small id="daily-capacity-help">
-            Número entero de 1 a 16. Se guarda en tu cuenta y aplica a todas
-            tus gestiones.
+            Número entero de 1 a {LIMITE_DIARIO_MAXIMO}. Se guarda en tu cuenta y
+            aplica a todas tus gestiones.
           </small>
           {error && (
             <div
@@ -1100,7 +1454,7 @@ function ConfiguracionCapacidadDiaria({
           </button>
           {guardado && !error && (
             <span role="status" className="daily-capacity-saved">
-              Capacidad actualizada
+              Límite guardado: {formatoHoras(Number(borrador))} h al día.
             </span>
           )}
         </div>
@@ -1124,9 +1478,15 @@ function Opciones() {
 }
 
 function Hoy() {
-  const { eventos, hoy, errorCarga, refrescar, actualizarSubtarea } =
-    useStore();
-  const [reprogramar, setReprogramar] = useState<Subtarea | null>(null);
+  const {
+    eventos,
+    hoy,
+    errorCarga,
+    refrescar,
+    actualizarSubtarea,
+    limiteDiario,
+  } = useStore();
+  const [reprogramar, setReprogramar] = useState<TareaHoy | null>(null);
 
   const grupos: GruposHoy = hoy?.grupos ?? {
     vencidas: [],
@@ -1134,6 +1494,7 @@ function Hoy() {
     proximas: [],
   };
   const total = hoy?.total ?? 0;
+  const cargaHoy = sumarHorasAbiertas(eventos, hoyISO());
 
   const cambiarEstado = (tarea: TareaHoy) => {
     actualizarSubtarea(tarea.eventoId, {
@@ -1187,7 +1548,10 @@ function Hoy() {
             Algo salió mal al cargar tus gestiones
           </div>
           <p className="empty-copy">{errorCarga}</p>
-          <button className="button button-primary" onClick={refrescar}>
+          <button
+            className="button button-primary"
+            onClick={() => refrescar()}
+          >
             <RotateCcw size={14} /> Reintentar
           </button>
         </div>
@@ -1195,22 +1559,31 @@ function Hoy() {
     );
   }
 
+  const descripcionHoy =
+    total > 0
+      ? `${total} ${total === 1 ? "gestión urgente" : "gestiones urgentes"}.`
+      : "El plan está despejado.";
+
   return (
     <div>
       <Encabezado
         eyebrow="Panel de control"
         titulo="Hoy"
-        descripcion={
-          total
-            ? `${total} ${total === 1 ? "gestión abierta" : "gestiones abiertas"}.`
-            : "El plan está despejado."
-        }
+        descripcion={descripcionHoy}
         accion={
           <Link href="/crear" className="button button-primary">
             <Plus size={15} /> Crear evento
           </Link>
         }
       />
+      <div className="hoy-resumen">
+        <IndicadorHoras
+          horas={cargaHoy}
+          limite={limiteDiario}
+          alcance="hoy"
+          testId="hoy-horas-planificadas"
+        />
+      </div>
       {eventos.length === 0 ? (
         <EmptyState
           titulo="Todavía no hay eventos"
@@ -1221,26 +1594,32 @@ function Hoy() {
             </Link>
           }
         />
-      ) : total === 0 ? (
-        <EmptyState
-          titulo="No hay gestiones pendientes"
-          copy="Todas las gestiones están hechas. Puedes revisar tus eventos o crear uno nuevo."
-          accion={
-            <Link href="/eventos" className="button button-secondary">
-              Ver eventos
-            </Link>
-          }
-        />
       ) : (
         <>
-          {bloque("Vencidas", grupos.vencidas, "No hay gestiones vencidas.")}
-          {bloque("Para hoy", grupos.para_hoy, "Nada vence hoy.")}
-          {bloque("Próximas", grupos.proximas, "No hay próximas gestiones.")}
+          {total === 0 && (
+            <EmptyState
+              titulo="No hay gestiones pendientes"
+              copy="Todo lo que vencía hoy está hecho. Puedes revisar tus eventos o crear uno nuevo."
+              accion={
+                <Link href="/eventos" className="button button-secondary">
+                  Ver eventos
+                </Link>
+              }
+            />
+          )}
+          {total > 0 && (
+            <>
+              {bloque("Vencidas", grupos.vencidas, "No hay gestiones vencidas.")}
+              {bloque("Para hoy", grupos.para_hoy, "Nada vence hoy.")}
+              {bloque("Próximas", grupos.proximas, "No hay próximas gestiones.")}
+            </>
+          )}
         </>
       )}
       {reprogramar && (
         <ReprogramarDialog
           tarea={reprogramar}
+          evento={eventos.find((e) => e.id === reprogramar.eventoId)}
           onClose={() => setReprogramar(null)}
         />
       )}
@@ -1248,24 +1627,26 @@ function Hoy() {
   );
 }
 
+/** Filtros de /eventos. Cada uno corresponde a un `estado_agenda` del servidor. */
+const FILTROS_EVENTO: { valor: string; etiqueta: string; vacio: string }[] = [
+  { valor: "activos", etiqueta: "Activos y retrasados", vacio: "No tienes eventos activos ni retrasados." },
+  { valor: "pasados", etiqueta: "Pasados", vacio: "No tienes eventos terminados." },
+  { valor: "cancelados", etiqueta: "Cancelados", vacio: "No tienes eventos cancelados." },
+  { valor: "todos", etiqueta: "Todos", vacio: "No tienes eventos." },
+];
+
+function coincideConFiltro(evento: Evento, filtro: string) {
+  if (filtro === "todos") return true;
+  if (filtro === "activos") return estaActivo(evento);
+  return evento.estadoAgenda === filtro;
+}
+
 function Eventos() {
   const { eventos } = useStore();
   const [filtro, setFiltro] = useState("activos");
+  const filtroActual = FILTROS_EVENTO.find((f) => f.valor === filtro)!;
   const lista = eventos
-    .filter((e) => {
-      if (filtro === "todos") return true;
-      const isActivo =
-        diferenciaDias(hoyISO(), e.fechaInicio) >= 0 ||
-        e.subtareas.some((t) => t.estado !== "hecho");
-      const isPasado =
-        diferenciaDias(hoyISO(), e.fechaInicio) < 0 &&
-        e.subtareas.every((t) => t.estado === "hecho");
-      if (filtro === "activos") return isActivo;
-      if (filtro === "pasados") return isPasado;
-      if (filtro === "cancelados") return false;
-      if (filtro === "retrasados") return false;
-      return true;
-    })
+    .filter((e) => coincideConFiltro(e, filtro))
     .sort((a, b) => a.fechaInicio.localeCompare(b.fechaInicio));
   return (
     <div>
@@ -1280,21 +1661,29 @@ function Eventos() {
         }
       />
       <div className="filter-row" style={{ marginBottom: 18 }}>
-        <select value={filtro} onChange={(e) => setFiltro(e.target.value)}>
-          <option value="activos">Activos</option>
-          <option value="pasados">Pasados</option>
-          <option value="cancelados">Cancelados</option>
-          <option value="retrasados">Retrasados</option>
-          <option value="todos">Todos los eventos</option>
+        <label htmlFor="filtro-eventos" className="muted" style={{ fontSize: 12 }}>
+          Filtro
+        </label>
+        <select
+          id="filtro-eventos"
+          value={filtro}
+          data-testid="filtro-eventos"
+          onChange={(e) => setFiltro(e.target.value)}
+        >
+          {FILTROS_EVENTO.map((f) => (
+            <option key={f.valor} value={f.valor}>
+              {f.etiqueta}
+            </option>
+          ))}
         </select>
         <span className="muted" style={{ fontSize: 12 }}>
-          {lista.length} visible
+          {lista.length === 1 ? "1 evento visible" : `${lista.length} eventos visibles`}
         </span>
       </div>
       {eventos.length === 0 ? (
         <EmptyState
           titulo="El tablero está vacío"
-          copy="Crea un evento."
+          copy="Crea tu primer evento para empezar."
           accion={
             <Link href="/crear" className="button button-primary">
               <Plus size={15} /> Crear evento
@@ -1303,15 +1692,21 @@ function Eventos() {
         />
       ) : lista.length === 0 ? (
         <EmptyState
-          titulo="No hay eventos activos"
-          copy="Puedes consultar todos los eventos o crear uno nuevo."
+          titulo={filtroActual.etiqueta}
+          copy={filtroActual.vacio}
           accion={
-            <button
-              className="button button-secondary"
-              onClick={() => setFiltro("todos")}
-            >
-              Ver todos
-            </button>
+            filtro !== "todos" ? (
+              <button
+                className="button button-secondary"
+                onClick={() => setFiltro("todos")}
+              >
+                Ver todos los eventos
+              </button>
+            ) : (
+              <Link href="/crear" className="button button-primary">
+                <Plus size={15} /> Crear evento
+              </Link>
+            )
           }
         />
       ) : (
@@ -1330,10 +1725,21 @@ function TarjetaEvento({ evento }: { evento: Evento }) {
     (t) => t.estado !== "hecho",
   ).length;
   return (
-    <Link href={"/evento/" + evento.id} className="card event-card">
+    <Link
+      href={"/evento/" + evento.id}
+      className={"card event-card" + (evento.cancelado ? " cancelado" : "")}
+    >
       <div className="event-card-top">
         <div>
           <h2 className="event-name">{evento.nombre}</h2>
+          {evento.cancelado && (
+            <span className="tag tag-cancelado">
+              <Ban size={10} aria-hidden="true" /> Cancelado
+            </span>
+          )}
+          {evento.estadoAgenda === "retrasado" && !evento.cancelado && (
+            <span className="tag tag-overdue">Retrasado</span>
+          )}
         </div>
         <ChevronRight size={17} color="#777" />
       </div>
@@ -1391,6 +1797,17 @@ type BorradorTarea = {
   horaInicio: string;
   estimacion: string;
 };
+/** Errores por campo de una gestión del plan inicial. */
+type ErrorTarea = Record<string, string>;
+
+const CATEGORIAS_GESTION = [
+  { valor: "otro", etiqueta: "Otro" },
+  { valor: "salon", etiqueta: "Salón" },
+  { valor: "invitaciones", etiqueta: "Invitaciones" },
+  { valor: "catering", etiqueta: "Catering" },
+  { valor: "proveedores", etiqueta: "Proveedores" },
+];
+
 const formEventoInicial = (): FormEvento => ({
   nombre: "",
   tipo: "Lanzamiento",
@@ -1401,50 +1818,118 @@ const formEventoInicial = (): FormEvento => ({
   lugar: "",
   notas: "",
 });
-const borradorInicial = (): BorradorTarea => ({
+const borradorInicial = (fechaLimite: string): BorradorTarea => ({
   id: generarId("draft"),
   titulo: "",
-  categoria: "salon",
+  categoria: "otro",
   prioridad: "media",
-  fechaLimite: sumarDias(hoyISO(), 7),
+  fechaLimite,
   horaLimite: "18:00",
   horaInicio: "",
   estimacion: "01:00",
 });
+
+/** Comprueba el borrador de una gestión del plan inicial. */
+function validarBorrador(borrador: BorradorTarea): ErrorTarea {
+  const e: ErrorTarea = {};
+  if (!borrador.titulo.trim()) e.titulo = "Escribe qué hay que hacer.";
+  if (!esHorasValidas(borrador.estimacion))
+    e.estimacion = "Indica una estimación entre 30 minutos y 24 h (HH:MM).";
+  if (!borrador.fechaLimite) e.fechaLimite = "Elige la fecha límite.";
+  if (!borrador.horaLimite) e.horaLimite = "Elige la hora límite.";
+  return e;
+}
+
+/**
+ * El plazo de una gestión no puede pasar del inicio del evento: es la misma
+ * regla que aplica el servidor al crear o editar una gestión.
+ */
+function validarPlazo(fechaLimite: string, fechaInicio: string): string {
+  if (fechaLimite && fechaInicio && fechaLimite > fechaInicio) {
+    return `No puede ser posterior al inicio del evento (${fechaBonita(
+      fechaInicio,
+      true,
+    )}).`;
+  }
+  return "";
+}
 function CrearEvento() {
   const [mostrarPlan, setMostrarPlan] = useState(false);
   const { crearEventoCompleto, eventos, limiteDiario } = useStore();
   const [, setLocation] = useLocation();
   const [datos, setDatos] = useState<FormEvento>(formEventoInicial);
   const [tareas, setTareas] = useState<BorradorTarea[]>([]);
-  const [nuevo, setNuevo] = useState<BorradorTarea>(borradorInicial);
-  const [errorNuevo, setErrorNuevo] = useState<Record<string, string>>({});
+  const [nuevo, setNuevo] = useState<BorradorTarea>(() =>
+    borradorInicial(formEventoInicial().fechaInicio),
+  );
+  const [errorNuevo, setErrorNuevo] = useState<ErrorTarea>({});
+  const [errorTareas, setErrorTareas] = useState<Record<string, ErrorTarea>>({});
   const [error, setError] = useState<Record<string, string>>({});
   const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false);
+
+  // Al mover la fecha de inicio, el fin y los plazos se recolocan solos para no
+  // dejar valores que el servidor no acepta.
   useEffect(() => {
+    setDatos((d) =>
+      d.fechaFin && d.fechaFin < d.fechaInicio
+        ? { ...d, fechaFin: d.fechaInicio }
+        : d,
+    );
     setTareas((actuales) =>
       actuales.map((t) => ({
         ...t,
-        fechaLimite: t.fechaLimite || datos.fechaInicio,
+        fechaLimite: !t.fechaLimite || t.fechaLimite > datos.fechaInicio
+          ? datos.fechaInicio
+          : t.fechaLimite,
       })),
     );
+    setNuevo((n) => ({
+      ...n,
+      fechaLimite:
+        !n.fechaLimite || n.fechaLimite > datos.fechaInicio
+          ? datos.fechaInicio
+          : n.fechaLimite,
+    }));
+    // Los plazos se acabaron de corregir: el aviso de plazo ya no aplica.
+    setError((errs) => {
+      const restantes = Object.entries(errs).filter(
+        ([campo]) => !campo.startsWith("plan:"),
+      );
+      return restantes.length ? Object.fromEntries(restantes) : {};
+    });
   }, [datos.fechaInicio]);
+
   const setCampo = (campo: keyof FormEvento, valor: string) => {
     setDatos((d) => ({ ...d, [campo]: valor }));
     setError((errs) => ({ ...errs, [campo]: "" }));
   };
+
+  // Al corregir el campo, su mensaje desaparece; al mover el inicio del evento
+  // los plazos se recolocan y el aviso de plazo deja de aplicar.
+  const actualizarTarea = (id: string, cambios: Partial<BorradorTarea>) => {
+    setTareas((ts) => ts.map((t) => (t.id === id ? { ...t, ...cambios } : t)));
+    setErrorTareas((errs) => ({ ...errs, [id]: { ...errs[id] } }));
+    setError((errs) => ({ ...errs, [`plan:${id}`]: "" }));
+  };
+
+  const quitarTarea = (id: string) => {
+    setTareas((ts) => ts.filter((t) => t.id !== id));
+    setErrorTareas(({ [id]: _quitada, ...resto }) => resto);
+  };
+
+  const errorDeTarea = (id: string, campo: string) => errorTareas[id]?.[campo] ?? "";
+
   const añadirTarea = () => {
-    const errs: Record<string, string> = {};
-    if (!nuevo.titulo.trim()) errs.titulo = "Obligatorio.";
-    if (!nuevo.estimacion.trim() || nuevo.estimacion === "00:00")
-      errs.estimacion = "Obligatorio.";
+    const errs = validarBorrador(nuevo);
+    const plazo = validarPlazo(nuevo.fechaLimite, datos.fechaInicio);
+    if (plazo) errs.fechaLimite = plazo;
     if (Object.keys(errs).length > 0) {
       setErrorNuevo(errs);
       return;
     }
     setErrorNuevo({});
     setTareas((ts) => [...ts, { ...nuevo, id: generarId("draft") }]);
-    setNuevo(borradorInicial());
+    setNuevo(borradorInicial(datos.fechaInicio));
   };
 
   const aplicarPlanPredefinido = (tipoPlan: string) => {
@@ -1518,27 +2003,39 @@ function CrearEvento() {
       id: generarId("draft"),
     }));
     setTareas(tareasNuevas);
+    setErrorTareas({});
   };
 
   const intentarSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError({});
 
-    if (mostrarPlan && !tareas.length && nuevo.titulo.trim()) {
-      const errs: Record<string, string> = {};
-      if (!nuevo.titulo.trim()) errs.titulo = "Obligatorio.";
-      if (!nuevo.estimacion.trim() || nuevo.estimacion === "00:00")
-        errs.estimacion = "Obligatorio.";
+    // Si el organizador escribió una gestión sin pulsar «Agregar», se incluye.
+    const pendienteDeAgregar = mostrarPlan && !tareas.length && nuevo.titulo.trim();
+    if (pendienteDeAgregar) {
+      const errs = validarBorrador(nuevo);
+      const plazo = validarPlazo(nuevo.fechaLimite, datos.fechaInicio);
+      if (plazo) errs.fechaLimite = plazo;
       if (Object.keys(errs).length > 0) {
         setErrorNuevo(errs);
       } else {
         setTareas((ts) => [...ts, { ...nuevo, id: generarId("draft") }]);
-        setNuevo(borradorInicial());
+        setNuevo(borradorInicial(datos.fechaInicio));
         setErrorNuevo({});
       }
     }
 
-    const validacion = validarDatosEvento(datos, tareas, mostrarPlan);
+    const validacion = validarDatosEvento(datos, mostrarPlan);
+    // Los plazos del plan se validan contra la fecha de inicio del evento.
+    if (mostrarPlan) {
+      tareas.forEach((t) => {
+        const problema = validarPlazo(t.fechaLimite, datos.fechaInicio);
+        if (problema) {
+          validacion[`plan:${t.id}`] = `Gestión ${tareas.indexOf(t) + 1}: ${problema}`;
+        }
+      });
+    }
+
     if (mostrarPlan && tareas.length) {
       const porFecha = tareas.reduce<Record<string, number>>((acum, tarea) => {
         acum[tarea.fechaLimite] =
@@ -1555,15 +2052,13 @@ function CrearEvento() {
         const detalle = conflictosDia
           .map(
             (dia) =>
-              `${fechaBonita(dia.fecha, true)}: ${formatoHoras(dia.horas)} h / ${limiteDiario} h (exceso ${formatoHoras(dia.horas - limiteDiario)} h)`,
+              `${fechaBonita(dia.fecha, true)}: ${formatoHoras(dia.horas)} h de ${formatoHoras(limiteDiario)} h (te pasas por ${formatoHoras(dia.horas - limiteDiario)} h)`,
           )
           .join("; ");
-        validacion.general = `${validacion.general ? `${validacion.general} ` : ""}El plan también supera la capacidad diaria: ${detalle}.`;
+        validacion.general = `El plan supera tu límite diario de ${formatoHoras(
+          limiteDiario,
+        )} h en ${detalle}.`;
       }
-    }
-
-    if (mostrarPlan && !tareas.length && Object.keys(errorNuevo).length === 0) {
-      setErrorNuevo({ titulo: "Obligatorio", estimacion: "Obligatorio" });
     }
 
     if (Object.keys(validacion).length > 0) {
@@ -1577,14 +2072,16 @@ function CrearEvento() {
     setMostrarConfirmacion(false);
     const eventoPayload = {
       nombre: datos.nombre.trim(),
-      tipo: datos.tipo,
+      tipo: datos.tipo.trim() || "Otro",
       fechaInicio: datos.fechaInicio,
       fechaFin: datos.fechaFin,
       horaEvento: datos.horaEvento,
       duracion: timeToHours(datos.duracion),
       lugar: datos.lugar.trim(),
       notas: datos.notas.trim(),
-      capacidadDiaria: 24,
+      // El límite diario real del organizador, no un valor fijo.
+      capacidadDiaria: limiteDiario,
+      cancelado: false,
     };
     const tareasPayload = tareas.map((t) => ({
       titulo: t.titulo.trim(),
@@ -1595,6 +2092,7 @@ function CrearEvento() {
       horaLimite: t.horaLimite,
       horaInicio: t.horaInicio || undefined,
       estimacion: timeToHours(t.estimacion),
+      motivoMovimiento: "",
     }));
     const id = await crearEventoCompleto(eventoPayload, tareasPayload);
     if (id) {
@@ -1608,411 +2106,514 @@ function CrearEvento() {
       <form onSubmit={intentarSubmit} className="card form-card" noValidate>
         <section className="form-section">
           <h2 className="form-section-title">Identidad del evento</h2>
+          <p className="form-section-note">
+            Los campos con * son obligatorios.
+          </p>
           <div className="form-grid">
             <div className="field full">
-              <label>
+              <label htmlFor="evento-nombre">
                 Nombre <span className="req">*</span>
               </label>
               {error.nombre && (
-                <div className="field-error">{error.nombre}</div>
+                <ErrorCampo id="evento-nombre-error">{error.nombre}</ErrorCampo>
               )}
               <input
+                id="evento-nombre"
                 className={error.nombre ? "error" : ""}
                 value={datos.nombre}
+                autoComplete="off"
+                aria-invalid={Boolean(error.nombre)}
+                aria-describedby={error.nombre ? "evento-nombre-error" : undefined}
                 onChange={(e) => setCampo("nombre", e.target.value)}
               />
             </div>
             <div className="field">
-              <label>Tipo</label>
-              {error.tipo && <div className="field-error">{error.tipo}</div>}
+              <label htmlFor="evento-tipo">Tipo</label>
+              {error.tipo && <ErrorCampo id="evento-tipo-error">{error.tipo}</ErrorCampo>}
               <select
+                id="evento-tipo"
                 className={error.tipo ? "error" : ""}
-                value={
-                  [
-                    "Lanzamiento",
-                    "Fiesta",
-                    "Taller",
-                    "Reunión",
-                    "Conferencia",
-                    "",
-                  ].includes(datos.tipo)
-                    ? datos.tipo
-                    : "Otro"
+                aria-invalid={Boolean(error.tipo)}
+                value={TIPOS_EVENTO.includes(datos.tipo) ? datos.tipo : "Otro"}
+                onChange={(e) =>
+                  setCampo("tipo", e.target.value === "Otro" ? "" : e.target.value)
                 }
-                onChange={(e) => setCampo("tipo", e.target.value)}
               >
-                <option value="Lanzamiento">Lanzamiento</option>
-                <option value="Fiesta">Fiesta</option>
-                <option value="Taller">Taller</option>
-                <option value="Reunión">Reunión</option>
-                <option value="Conferencia">Conferencia</option>
-                <option value="Otro">Otro...</option>
+                {TIPOS_EVENTO.map((tipo) => (
+                  <option key={tipo} value={tipo}>
+                    {tipo}
+                  </option>
+                ))}
+                <option value="Otro">Otro…</option>
               </select>
             </div>
             <div className="field">
-              <label>
+              <label htmlFor="evento-lugar">
                 Lugar <span className="req">*</span>
               </label>
-              {error.lugar && <div className="field-error">{error.lugar}</div>}
+              {error.lugar && (
+                <ErrorCampo id="evento-lugar-error">{error.lugar}</ErrorCampo>
+              )}
               <input
+                id="evento-lugar"
                 className={error.lugar ? "error" : ""}
                 value={datos.lugar}
+                autoComplete="off"
+                aria-invalid={Boolean(error.lugar)}
+                aria-describedby={error.lugar ? "evento-lugar-error" : undefined}
                 onChange={(e) => setCampo("lugar", e.target.value)}
               />
             </div>
-            {(![
-              "Lanzamiento",
-              "Fiesta",
-              "Taller",
-              "Reunión",
-              "Conferencia",
-              "",
-            ].includes(datos.tipo) ||
-              datos.tipo === "Otro") && (
+            {!TIPOS_EVENTO.includes(datos.tipo) && (
               <div className="field full">
+                <label htmlFor="evento-tipo-personalizado">
+                  Escribe el tipo del evento
+                </label>
+                {error.tipo && <ErrorCampo id="evento-tipo-error">{error.tipo}</ErrorCampo>}
                 <input
-                  placeholder="Escribe el tipo personalizado..."
-                  value={datos.tipo === "Otro" ? "" : datos.tipo}
+                  id="evento-tipo-personalizado"
+                  className={error.tipo ? "error" : ""}
+                  placeholder="Por ejemplo: Aniversario"
+                  value={datos.tipo}
+                  aria-invalid={Boolean(error.tipo)}
+                  aria-describedby={error.tipo ? "evento-tipo-error" : undefined}
                   onChange={(e) => setCampo("tipo", e.target.value)}
                 />
               </div>
             )}
-            <div className="field">
-              <label>
-                Inicio <span className="req">*</span>
-              </label>
-              {error.fechaInicio && (
-                <div className="field-error">{error.fechaInicio}</div>
-              )}
-              <input
-                type="date"
-                className={error.fechaInicio ? "error" : ""}
-                value={datos.fechaInicio}
-                onChange={(e) => setCampo("fechaInicio", e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label>
-                Fin <span className="req">*</span>
-              </label>
-              {error.fechaFin && (
-                <div className="field-error">{error.fechaFin}</div>
-              )}
-              <input
-                type="date"
-                className={error.fechaFin ? "error" : ""}
-                value={datos.fechaFin}
-                onChange={(e) => setCampo("fechaFin", e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label>
-                Hora <span className="req">*</span>
-              </label>
-              {error.horaEvento && (
-                <div className="field-error">{error.horaEvento}</div>
-              )}
-              <input
-                type="time"
-                className={error.horaEvento ? "error" : ""}
-                value={datos.horaEvento}
-                onChange={(e) => setCampo("horaEvento", e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label>
-                Duración (horas) <span className="req">*</span>
-              </label>
-              {error.duracion && (
-                <div className="field-error">{error.duracion}</div>
-              )}
-              <input
-                type="text"
-                pattern="[0-9]{2}:[0-9]{2}"
-                placeholder="00:00"
-                maxLength={5}
-                className={error.duracion ? "error" : ""}
-                value={datos.duracion}
-                onChange={(e) => setCampo("duracion", e.target.value)}
-                aria-label="Duración del evento en horas y minutos"
-              />
+            <div className="field full">
+              <div className="form-grid form-grid-dates">
+                <div className="field">
+                  <label htmlFor="evento-inicio">
+                    Fecha de inicio <span className="req">*</span>
+                  </label>
+                  {error.fechaInicio && (
+                    <ErrorCampo id="evento-inicio-error">
+                      {error.fechaInicio}
+                    </ErrorCampo>
+                  )}
+                  <input
+                    id="evento-inicio"
+                    type="date"
+                    className={error.fechaInicio ? "error" : ""}
+                    value={datos.fechaInicio}
+                    aria-invalid={Boolean(error.fechaInicio)}
+                    aria-describedby={
+                      error.fechaInicio ? "evento-inicio-error" : undefined
+                    }
+                    onChange={(e) => setCampo("fechaInicio", e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="evento-fin">
+                    Fecha de fin <span className="req">*</span>
+                  </label>
+                  {error.fechaFin && (
+                    <ErrorCampo id="evento-fin-error">{error.fechaFin}</ErrorCampo>
+                  )}
+                  <input
+                    id="evento-fin"
+                    type="date"
+                    min={datos.fechaInicio || undefined}
+                    className={error.fechaFin ? "error" : ""}
+                    value={datos.fechaFin}
+                    aria-invalid={Boolean(error.fechaFin)}
+                    aria-describedby={
+                      error.fechaFin ? "evento-fin-error" : "evento-fin-ayuda"
+                    }
+                    onChange={(e) => setCampo("fechaFin", e.target.value)}
+                  />
+                  <small className="field-hint" id="evento-fin-ayuda">
+                    No puede ser anterior al inicio.
+                  </small>
+                </div>
+                <div className="field">
+                  <label htmlFor="evento-hora">
+                    Hora de inicio <span className="req">*</span>
+                  </label>
+                  {error.horaEvento && (
+                    <ErrorCampo id="evento-hora-error">{error.horaEvento}</ErrorCampo>
+                  )}
+                  <input
+                    id="evento-hora"
+                    type="time"
+                    className={error.horaEvento ? "error" : ""}
+                    value={datos.horaEvento}
+                    aria-invalid={Boolean(error.horaEvento)}
+                    aria-describedby={
+                      error.horaEvento ? "evento-hora-error" : undefined
+                    }
+                    onChange={(e) => setCampo("horaEvento", e.target.value)}
+                  />
+                </div>
+                <CampoDuracion
+                  id="evento-duracion"
+                  testId="evento-duracion"
+                  valor={datos.duracion}
+                  error={error.duracion}
+                  limiteDiario={limiteDiario}
+                  onChange={(valor) => setCampo("duracion", valor)}
+                />
+              </div>
             </div>
             <div className="field full">
-              <label>Notas</label>
+              <label htmlFor="evento-notas">Notas de producción</label>
               <textarea
+                id="evento-notas"
                 value={datos.notas}
+                placeholder="Accesos, equipos, contactos clave…"
                 onChange={(e) => setCampo("notas", e.target.value)}
               />
             </div>
           </div>
         </section>
         {!mostrarPlan ? (
-          <section
-            className="form-section"
-            style={{
-              textAlign: "center",
-              padding: "40px 20px",
-              background: "var(--panel-alt)",
-              borderRadius: "var(--radio-lg)",
-              margin: "21px",
-              border: "1px solid var(--linea)",
-            }}
-          >
+          <section className="form-section plan-invitar">
+            <div>
+              <div className="plan-card-num">Opcional</div>
+              <h2 className="form-section-title">Plan inicial de gestiones</h2>
+              <p className="form-section-note">
+                Añade las primeras tareas del evento. Puedes empezar desde una
+                plantilla o escribirlas una a una.
+              </p>
+            </div>
             <button
               type="button"
-              className="button button-primary"
+              className="button button-secondary"
               onClick={() => setMostrarPlan(true)}
+              data-testid="activar-plan"
             >
-              + Agregar un plan inicial de gestiones (Opcional)
+              <Plus size={14} /> Agregar plan inicial
             </button>
           </section>
         ) : (
           <section className="form-section">
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "20px",
-              }}
-            >
-              <h2
-                className="form-section-title"
-                style={{ borderBottom: "none", paddingBottom: 0, margin: 0 }}
-              >
-                Plan inicial
-              </h2>
-              <div
-                style={{ display: "flex", gap: "10px", alignItems: "center" }}
-              >
+            <div className="plan-head">
+              <div>
+                <h2 className="form-section-title plan-title">
+                  Plan inicial
+                  <span className="plan-total">
+                    {tareas.length}{" "}
+                    {tareas.length === 1 ? "gestión" : "gestiones"}
+                  </span>
+                </h2>
+                <p className="form-section-note">
+                  Cada gestión se resuelve{" "}
+                  <strong>antes o el mismo día</strong> del inicio del evento (
+                  {fechaBonita(datos.fechaInicio, true)}).
+                </p>
+              </div>
+              <div className="plan-head-acciones">
                 <button
                   type="button"
                   className="button button-ghost button-small"
                   onClick={() => setMostrarPlan(false)}
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  className="button button-primary button-small"
-                  onClick={añadirTarea}
-                >
-                  <Plus size={14} /> Agregar plan inicial
+                  Quitar plan
                 </button>
               </div>
             </div>
-            <div className="task-builder">
-              <div style={{ marginBottom: "15px" }}>
-                <select
-                  onChange={(e) => aplicarPlanPredefinido(e.target.value)}
-                  defaultValue=""
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: "4px",
-                    border: "1px solid var(--linea)",
-                    background: "var(--panel-alt)",
-                    color: "var(--text)",
-                  }}
-                >
-                  <option value="" disabled>
-                    Cargar plantilla rápida...
-                  </option>
-                  <option value="conferencia">Plan Conferencia</option>
-                  <option value="fiesta">Plan Fiesta</option>
-                  <option value="boda">Plan Boda</option>
-                  <option value="reunion">Plan Reunión</option>
-                </select>
+
+            <div className="plan-plantillas">
+              <label htmlFor="plan-plantilla">Plantillas rápidas</label>
+              <select
+                id="plan-plantilla"
+                value=""
+                onChange={(e) => aplicarPlanPredefinido(e.target.value)}
+              >
+                <option value="">Cargar una plantilla…</option>
+                <option value="conferencia">Plan Conferencia</option>
+                <option value="fiesta">Plan Fiesta</option>
+                <option value="boda">Plan Boda</option>
+                <option value="reunion">Plan Reunión</option>
+              </select>
+              <small className="field-hint">
+                Al cargar una plantilla se reemplazan las gestiones del plan.
+              </small>
+            </div>
+
+            {tareas.length > 0 && (
+              <ul className="plan-lista">
+                {tareas.map((t, index) => (
+                  <li className="plan-card" key={t.id}>
+                    <div className="plan-card-head">
+                      <span className="plan-card-num">Gestión {index + 1}</span>
+                      <button
+                        type="button"
+                        className="button button-small button-ghost button-icon"
+                        onClick={() => quitarTarea(t.id)}
+                        title={`Quitar la gestión ${index + 1}`}
+                        aria-label={`Quitar «${t.titulo || `la gestión ${index + 1}`}» del plan`}
+                        data-testid={`quitar-plan-${index + 1}`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                    <div className="field">
+                      <label htmlFor={`plan-${t.id}-titulo`}>
+                        Qué hay que hacer <span className="req">*</span>
+                      </label>
+                      {errorDeTarea(t.id, "titulo") && (
+                        <ErrorCampo id={`plan-${t.id}-titulo-error`}>
+                          {errorDeTarea(t.id, "titulo")}
+                        </ErrorCampo>
+                      )}
+                      <input
+                        id={`plan-${t.id}-titulo`}
+                        value={t.titulo}
+                        className={errorDeTarea(t.id, "titulo") ? "error" : ""}
+                        aria-invalid={Boolean(errorDeTarea(t.id, "titulo"))}
+                        aria-describedby={
+                          errorDeTarea(t.id, "titulo")
+                            ? `plan-${t.id}-titulo-error`
+                            : undefined
+                        }
+                        onChange={(e) =>
+                          actualizarTarea(t.id, { titulo: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="plan-grid">
+                      <CampoHoras
+                        id={`plan-${t.id}-estimacion`}
+                        valor={t.estimacion}
+                        error={errorDeTarea(t.id, "estimacion")}
+                        onChange={(valor) =>
+                          actualizarTarea(t.id, { estimacion: valor })
+                        }
+                      />
+                      <div className="field">
+                        <label htmlFor={`plan-${t.id}-categoria`}>Categoría</label>
+                        <select
+                          id={`plan-${t.id}-categoria`}
+                          value={t.categoria}
+                          onChange={(e) =>
+                            actualizarTarea(t.id, { categoria: e.target.value })
+                          }
+                        >
+                          {CATEGORIAS_GESTION.map((c) => (
+                            <option key={c.valor} value={c.valor}>
+                              {c.etiqueta}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`plan-${t.id}-fecha`}>
+                          Fecha límite <span className="req">*</span>
+                        </label>
+                        {errorDeTarea(t.id, "fechaLimite") && (
+                          <ErrorCampo id={`plan-${t.id}-fecha-error`}>
+                            {errorDeTarea(t.id, "fechaLimite")}
+                          </ErrorCampo>
+                        )}
+                        <input
+                          id={`plan-${t.id}-fecha`}
+                          type="date"
+                          max={datos.fechaInicio || undefined}
+                          data-testid="initial-plan-deadline"
+                          value={t.fechaLimite}
+                          className={errorDeTarea(t.id, "fechaLimite") ? "error" : ""}
+                          aria-invalid={Boolean(errorDeTarea(t.id, "fechaLimite"))}
+                          aria-describedby={
+                            errorDeTarea(t.id, "fechaLimite")
+                              ? `plan-${t.id}-fecha-error`
+                              : `plan-${t.id}-fecha-ayuda`
+                          }
+                          onChange={(e) =>
+                            actualizarTarea(t.id, { fechaLimite: e.target.value })
+                          }
+                        />
+                        <small className="field-hint" id={`plan-${t.id}-fecha-ayuda`}>
+                          Máximo {fechaBonita(datos.fechaInicio, true)}.
+                        </small>
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`plan-${t.id}-hora`}>
+                          Hora límite <span className="req">*</span>
+                        </label>
+                        {errorDeTarea(t.id, "horaLimite") && (
+                          <ErrorCampo id={`plan-${t.id}-hora-error`}>
+                            {errorDeTarea(t.id, "horaLimite")}
+                          </ErrorCampo>
+                        )}
+                        <input
+                          id={`plan-${t.id}-hora`}
+                          type="time"
+                          value={t.horaLimite}
+                          className={errorDeTarea(t.id, "horaLimite") ? "error" : ""}
+                          aria-invalid={Boolean(errorDeTarea(t.id, "horaLimite"))}
+                          aria-describedby={
+                            errorDeTarea(t.id, "horaLimite")
+                              ? `plan-${t.id}-hora-error`
+                              : undefined
+                          }
+                          onChange={(e) =>
+                            actualizarTarea(t.id, { horaLimite: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+                    {error[`plan:${t.id}`] && (
+                      <div className="field-error" role="alert">
+                        {error[`plan:${t.id}`]}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="plan-nueva">
+              <div className="plan-card-head">
+                <span className="plan-card-num">
+                  Nueva gestión
+                  {tareas.length > 0 && ` ${tareas.length + 1}`}
+                </span>
               </div>
-              {tareas.map((t, index) => (
-                <div
-                  className="card card-pad"
-                  style={{
-                    border: "1px solid var(--linea-fuerte)",
-                    background: "var(--panel)",
-                    marginBottom: 10,
-                    position: "relative",
+              <div className="field">
+                <label htmlFor="plan-nuevo-titulo">
+                  Qué hay que hacer <span className="req">*</span>
+                </label>
+                {errorNuevo.titulo && (
+                  <ErrorCampo id="plan-nuevo-titulo-error">
+                    {errorNuevo.titulo}
+                  </ErrorCampo>
+                )}
+                <input
+                  id="plan-nuevo-titulo"
+                  className={errorNuevo.titulo ? "error" : ""}
+                  value={nuevo.titulo}
+                  aria-invalid={Boolean(errorNuevo.titulo)}
+                  aria-describedby={
+                    errorNuevo.titulo ? "plan-nuevo-titulo-error" : undefined
+                  }
+                  onChange={(e) => {
+                    setNuevo({ ...nuevo, titulo: e.target.value });
+                    setErrorNuevo((errs) => ({ ...errs, titulo: "" }));
                   }}
-                  key={t.id}
-                >
-                  <button
-                    type="button"
-                    className="button button-small button-danger button-icon"
-                    style={{ position: "absolute", top: 10, right: 10 }}
-                    onClick={() =>
-                      setTareas((ts) => ts.filter((x) => x.id !== t.id))
+                />
+              </div>
+              <div className="plan-grid">
+                <CampoHoras
+                  id="plan-nuevo-estimacion"
+                  valor={nuevo.estimacion}
+                  error={errorNuevo.estimacion}
+                  onChange={(valor) => {
+                    setNuevo({ ...nuevo, estimacion: valor });
+                    setErrorNuevo((errs) => ({ ...errs, estimacion: "" }));
+                  }}
+                />
+                <div className="field">
+                  <label htmlFor="plan-nuevo-categoria">Categoría</label>
+                  <select
+                    id="plan-nuevo-categoria"
+                    value={nuevo.categoria}
+                    onChange={(e) =>
+                      setNuevo({ ...nuevo, categoria: e.target.value })
                     }
                   >
-                    <Trash2 size={13} />
-                  </button>
-                  <div
-                    className="form-grid"
-                    style={{ gridTemplateColumns: "1fr 1fr", marginTop: 15 }}
-                  >
-                    <div className="field">
-                      <label>
-                        Gestión {index + 1} <span className="req">*</span>
-                      </label>
-                      <input
-                        value={t.titulo}
-                        onChange={(e) =>
-                          setTareas((ts) =>
-                            ts.map((x) =>
-                              x.id === t.id
-                                ? { ...x, titulo: e.target.value }
-                                : x,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                    <div className="field">
-                      <label>
-                        Estimación (horas) <span className="req">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        pattern="[0-9]{2}:[0-9]{2}"
-                        placeholder="00:00"
-                        maxLength={5}
-                        value={t.estimacion}
-                        onChange={(e) =>
-                          setTareas((ts) =>
-                            ts.map((x) =>
-                              x.id === t.id
-                                ? { ...x, estimacion: e.target.value }
-                                : x,
-                            ),
-                          )
-                        }
-                        aria-label="Estimación de la gestión en horas y minutos"
-                      />
-                    </div>
-                    <div className="field">
-                      <label>Plazo</label>
-                      <input
-                        type="date"
-                        data-testid="initial-plan-deadline"
-                        value={t.fechaLimite}
-                        onChange={(e) =>
-                          setTareas((ts) =>
-                            ts.map((x) =>
-                              x.id === t.id
-                                ? { ...x, fechaLimite: e.target.value }
-                                : x,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                    <div className="field">
-                      <label>Hora</label>
-                      <input
-                        type="time"
-                        value={t.horaLimite}
-                        onChange={(e) =>
-                          setTareas((ts) =>
-                            ts.map((x) =>
-                              x.id === t.id
-                                ? { ...x, horaLimite: e.target.value }
-                                : x,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                  </div>
+                    {CATEGORIAS_GESTION.map((c) => (
+                      <option key={c.valor} value={c.valor}>
+                        {c.etiqueta}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              ))}
-              <div
-                className="card card-pad"
-                style={{
-                  border: "1px solid var(--primary)",
-                  background: "var(--panel-alt)",
-                }}
-              >
-                <div
-                  className="form-grid"
-                  style={{ gridTemplateColumns: "1fr 1fr" }}
+                <div className="field">
+                  <label htmlFor="plan-nuevo-fecha">
+                    Fecha límite <span className="req">*</span>
+                  </label>
+                  {errorNuevo.fechaLimite && (
+                    <ErrorCampo id="plan-nuevo-fecha-error">
+                      {errorNuevo.fechaLimite}
+                    </ErrorCampo>
+                  )}
+                  <input
+                    id="plan-nuevo-fecha"
+                    type="date"
+                    max={datos.fechaInicio || undefined}
+                    data-testid="plan-nuevo-deadline"
+                    value={nuevo.fechaLimite}
+                    className={errorNuevo.fechaLimite ? "error" : ""}
+                    aria-invalid={Boolean(errorNuevo.fechaLimite)}
+                    aria-describedby={
+                      errorNuevo.fechaLimite
+                        ? "plan-nuevo-fecha-error"
+                        : "plan-nuevo-fecha-ayuda"
+                    }
+                    onChange={(e) => {
+                      setNuevo({ ...nuevo, fechaLimite: e.target.value });
+                      setErrorNuevo((errs) => ({ ...errs, fechaLimite: "" }));
+                    }}
+                  />
+                  <small className="field-hint" id="plan-nuevo-fecha-ayuda">
+                    Máximo {fechaBonita(datos.fechaInicio, true)}. La gestión debe
+                    estar resuelta antes de esa fecha.
+                  </small>
+                </div>
+                <div className="field">
+                  <label htmlFor="plan-nuevo-hora">
+                    Hora límite <span className="req">*</span>
+                  </label>
+                  {errorNuevo.horaLimite && (
+                    <ErrorCampo id="plan-nuevo-hora-error">
+                      {errorNuevo.horaLimite}
+                    </ErrorCampo>
+                  )}
+                  <input
+                    id="plan-nuevo-hora"
+                    type="time"
+                    value={nuevo.horaLimite}
+                    className={errorNuevo.horaLimite ? "error" : ""}
+                    aria-invalid={Boolean(errorNuevo.horaLimite)}
+                    aria-describedby={
+                      errorNuevo.horaLimite ? "plan-nuevo-hora-error" : undefined
+                    }
+                    onChange={(e) => {
+                      setNuevo({ ...nuevo, horaLimite: e.target.value });
+                      setErrorNuevo((errs) => ({ ...errs, horaLimite: "" }));
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="plan-nueva-acciones">
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={añadirTarea}
+                  data-testid="anadir-plan"
                 >
-                  <div className="field">
-                    <label>
-                      Nueva gestión <span className="req">*</span>
-                    </label>
-                    {errorNuevo.titulo && (
-                      <div className="field-error">{errorNuevo.titulo}</div>
-                    )}
-                    <input
-                      className={errorNuevo.titulo ? "error" : ""}
-                      value={nuevo.titulo}
-                      onChange={(e) =>
-                        setNuevo({ ...nuevo, titulo: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label>
-                      Estimación (horas) <span className="req">*</span>
-                    </label>
-                    {errorNuevo.estimacion && (
-                      <div className="field-error">{errorNuevo.estimacion}</div>
-                    )}
-                    <input
-                      type="text"
-                      pattern="[0-9]{2}:[0-9]{2}"
-                      placeholder="00:00"
-                      maxLength={5}
-                      className={errorNuevo.estimacion ? "error" : ""}
-                      value={nuevo.estimacion}
-                      onChange={(e) =>
-                        setNuevo({ ...nuevo, estimacion: e.target.value })
-                      }
-                      aria-label="Estimación de la gestión en horas y minutos"
-                    />
-                  </div>
-                  <div className="field">
-                    <label>Plazo</label>
-                    <input
-                      type="date"
-                      value={nuevo.fechaLimite}
-                      onChange={(e) =>
-                        setNuevo({ ...nuevo, fechaLimite: e.target.value })
-                      }
-                    />
-                    <small className="field-hint">
-                      La fecha organiza el trabajo de la gestión y puede ser
-                      distinta de las fechas reales del evento.
-                    </small>
-                  </div>
-                  <div className="field">
-                    <label>Hora</label>
-                    <input
-                      type="time"
-                      value={nuevo.horaLimite}
-                      onChange={(e) =>
-                        setNuevo({ ...nuevo, horaLimite: e.target.value })
-                      }
-                    />
-                  </div>
-                </div>
+                  <Plus size={14} /> Agregar al plan
+                </button>
               </div>
             </div>
           </section>
         )}
-        {error.general && <div className="error-box">{error.general}</div>}
+        {error.general && (
+          <div className="error-box" role="alert">
+            {error.general}
+          </div>
+        )}
         <div className="form-actions">
           <Link href="/eventos" className="button button-ghost">
             Cancelar
           </Link>
           <button className="button button-primary" type="submit">
-            <Check size={15} /> Crear evento y plan
+            <Check size={15} /> Crear evento
           </button>
         </div>
       </form>
       {mostrarConfirmacion && (
         <ConfirmDialog
-          titulo="¿Crear evento y plan?"
-          mensaje="¿Confirmas la creación de este evento y su plan de gestiones?"
+          titulo="¿Crear el evento?"
+          mensaje={
+            tareas.length
+              ? `Se creará «${datos.nombre.trim()}» con ${tareas.length} ${
+                  tareas.length === 1 ? "gestión" : "gestiones"
+                } en su plan.`
+              : `Se creará «${datos.nombre.trim()}» sin plan de gestiones.`
+          }
           onClose={() => setMostrarConfirmacion(false)}
           onConfirm={confirmarSubmit}
           confirmText="Aceptar"
@@ -2023,35 +2624,41 @@ function CrearEvento() {
   );
 }
 
-function validarDatosEvento(
-  datos: FormEvento,
-  tareas: BorradorTarea[],
-  mostrarPlan: boolean,
-) {
+/** Reglas del formulario general de evento, compartidas por crear y editar. */
+function validarDatosEvento(datos: FormEvento, mostrarPlan: boolean) {
   const e: Record<string, string> = {};
-  if (!datos.nombre.trim()) e.nombre = "El nombre es obligatorio.";
-  if (!datos.lugar.trim()) e.lugar = "El lugar es obligatorio.";
-  if (!datos.fechaInicio || !datos.fechaFin) {
-    if (!datos.fechaInicio) e.fechaInicio = "Elige una fecha.";
-    if (!datos.fechaFin) e.fechaFin = "Elige una fecha.";
-  } else if (datos.fechaFin < datos.fechaInicio) e.fechaFin = "Inválida.";
-  if (timeToHours(datos.duracion) <= 0)
-    e.duracion = "Indica una duración mayor a 0.";
-
-  if (!datos.horaEvento) e.horaEvento = "Obligatoria.";
-  if (mostrarPlan && !tareas.length)
+  if (!datos.nombre.trim()) e.nombre = "Escribe el nombre del evento.";
+  if (!datos.lugar.trim()) e.lugar = "Indica dónde se hará el evento.";
+  if (!datos.fechaInicio) e.fechaInicio = "Elige la fecha de inicio.";
+  if (!datos.fechaFin) e.fechaFin = "Elige la fecha de fin.";
+  if (datos.fechaInicio && datos.fechaFin && datos.fechaFin < datos.fechaInicio) {
+    e.fechaFin = "La fecha de fin no puede ser anterior a la de inicio.";
+  }
+  if (!datos.horaEvento) e.horaEvento = "Indica la hora de inicio del evento.";
+  if (!esHorasValidas(datos.duracion)) {
+    e.duracion = `Elige una duración entre ${textoDuracion(DURACION_MINIMA)} y ${
+      LIMITE_DIARIO_MAXIMO
+    } h.`;
+  }
+  if (!datos.tipo.trim()) e.tipo = "Elige o escribe el tipo de evento.";
+  if (mostrarPlan) {
     e.general =
-      "Agrega al menos una gestión. Haz clic en '+ Agregar plan inicial' o cancela la creación del plan.";
+      "Agrega al menos una gestión al plan o quita el plan para crear solo el evento.";
+  }
   return e;
 }
 
-function validarTarea(candidata: Subtarea) {
+/** Reglas de una gestión, con el plazo acotado por el inicio del evento. */
+function validarTarea(candidata: Subtarea, fechaInicio?: string) {
   const e: Record<string, string> = {};
-  if (!candidata.titulo.trim()) e.titulo = "El título es obligatorio.";
-  if (!candidata.fechaLimite) e.fechaLimite = "Elige fecha.";
-  if (!candidata.horaLimite) e.horaLimite = "Elige hora.";
-  if (candidata.estimacion <= 0) e.estimacion = "Mayor que 0.";
-  // El plazo organiza trabajo logístico; puede estar antes o después de las fechas reales del evento.
+  if (!candidata.titulo.trim()) e.titulo = "Escribe qué hay que hacer.";
+  if (!candidata.fechaLimite) e.fechaLimite = "Elige la fecha límite.";
+  const plazo = validarPlazo(candidata.fechaLimite, fechaInicio ?? "");
+  if (plazo) e.fechaLimite = plazo;
+  if (!candidata.horaLimite) e.horaLimite = "Elige la hora límite.";
+  if (!esHorasValidas(hoursToTime(candidata.estimacion))) {
+    e.estimacion = "Indica una estimación entre 30 minutos y 24 h (HH:MM).";
+  }
   return e;
 }
 
@@ -2072,6 +2679,7 @@ function DetalleEvento() {
   const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null);
   const [mover, setMover] = useState<Subtarea | null>(null);
   const [editarEvento, setEditarEvento] = useState(false);
+  const [guardandoEvento, setGuardandoEvento] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState<{
     tipo: "evento" | "tarea";
     id: string;
@@ -2117,8 +2725,28 @@ function DetalleEvento() {
     }
   };
 
-  const pendientes = evento.subtareas.filter((t) => t.estado !== "hecho");
-  const completadas = evento.subtareas.filter((t) => t.estado === "hecho");
+  const alternarCancelacion = async () => {
+    setGuardandoEvento(true);
+    await actualizarEvento(evento.id, {
+      nombre: evento.nombre,
+      tipo: evento.tipo,
+      fechaInicio: evento.fechaInicio,
+      fechaFin: evento.fechaFin,
+      horaEvento: evento.horaEvento,
+      duracion: evento.duracion,
+      lugar: evento.lugar,
+      notas: evento.notas,
+      capacidadDiaria: evento.capacidadDiaria,
+      cancelado: !evento.cancelado,
+    });
+    setGuardandoEvento(false);
+  };
+
+  // La lista no se reordena al completar: la fila conserva su sitio y solo
+  // cambia su estado visual, para que la casilla no salte de posición.
+  const gestionadas = evento.subtareas;
+  const abiertas = gestionadas.filter((t) => t.estado !== "hecho");
+  const completadas = gestionadas.filter((t) => t.estado === "hecho");
   const porcentaje = calcularPorcentaje(evento);
   return (
     <div>
@@ -2128,16 +2756,43 @@ function DetalleEvento() {
       <div className="detail-head">
         <div>
           <h1 className="detail-title">{evento.nombre}</h1>
-          <p className="page-description" style={{ marginTop: 6 }}>
-            {formatoHoras(evento.horasPlanificadas)} h de trabajo planificadas ·{" "}
-            {pendientes.length}{" "}
-            {pendientes.length === 1 ? "gestión abierta" : "gestiones abiertas"}
-          </p>
+          <div className="detail-subtitulo">
+            {evento.cancelado ? (
+              <span className="tag tag-cancelado">
+                <Ban size={10} aria-hidden="true" /> Evento cancelado
+              </span>
+            ) : (
+              <span className="detail-meta">
+                {abiertas.length}{" "}
+                {abiertas.length === 1
+                  ? "gestión abierta"
+                  : "gestiones abiertas"}
+                {completadas.length > 0 && ` · ${completadas.length} hecha${
+                  completadas.length === 1 ? "" : "s"
+                }`}
+              </span>
+            )}
+          </div>
         </div>
         <div className="detail-score">
           <div className="score-number">{porcentaje}%</div>
+          <div className="score-label">del plan ejecutado</div>
         </div>
       </div>
+      <div className="detail-resumen">
+        <IndicadorHoras
+          horas={evento.horasPlanificadas}
+          limite={limiteDiario}
+          alcance="evento"
+          testId="evento-horas-planificadas"
+        />
+      </div>
+      <section
+        className="card card-pad detail-progress"
+        aria-label="Progreso del evento"
+      >
+        <BarraProgresoEvento evento={evento} />
+      </section>
       <div className="detail-actions">
         <button
           className="button button-primary"
@@ -2151,6 +2806,22 @@ function DetalleEvento() {
           onClick={() => setEditarEvento(true)}
         >
           <Pencil size={14} /> Editar evento
+        </button>
+        <button
+          className="button button-secondary"
+          onClick={alternarCancelacion}
+          disabled={guardandoEvento}
+          data-testid="alternar-cancelacion"
+        >
+          {evento.cancelado ? (
+            <>
+              <RotateCcw size={14} /> Reactivar evento
+            </>
+          ) : (
+            <>
+              <Ban size={14} /> Cancelar evento
+            </>
+          )}
         </button>
         <button className="button button-danger" onClick={eliminarEv}>
           <Trash2 size={14} /> Eliminar evento
@@ -2203,19 +2874,20 @@ function DetalleEvento() {
       {mover && (
         <ReprogramarDialog
           tarea={mover}
+          evento={evento}
           onClose={() => setMover(null)}
         />
       )}
       <div className="detail-layout">
         <section>
           {mostrarAgregar && (
-            <div style={{ marginBottom: 22 }}>
+            <div className="detail-form">
               <TaskEditor
                 evento={evento}
                 onCancel={() => setMostrarAgregar(false)}
                 onSave={async (t) => {
-                  const e = validarTarea(t as Subtarea);
-                  if (e && Object.keys(e).length > 0) return false;
+                  const e = validarTarea(t as Subtarea, evento.fechaInicio);
+                  if (Object.keys(e).length > 0) return false;
                   const problema = validarCapacidadesTarea(
                     eventos,
                     evento.id,
@@ -2230,9 +2902,9 @@ function DetalleEvento() {
               />
             </div>
           )}
-          {pendientes.length ? (
+          {gestionadas.length ? (
             <div className="task-list">
-              {pendientes.map((t) => (
+              {gestionadas.map((t) => (
                 <FilaTarea
                   key={t.id}
                   tarea={t}
@@ -2246,20 +2918,8 @@ function DetalleEvento() {
           ) : (
             <EmptyState
               titulo="Plan despejado"
-              copy="No hay gestiones pendientes."
+              copy="Este evento todavía no tiene gestiones. Agrega la primera para empezar."
             />
-          )}
-          {completadas.length > 0 && (
-            <div className="task-list">
-              {completadas.map((t) => (
-                <FilaTarea
-                  key={t.id}
-                  tarea={t}
-                  onToggle={() => toggle(t)}
-                  onReprogramar={() => setMover(t)}
-                />
-              ))}
-            </div>
           )}
         </section>
       </div>
@@ -2296,7 +2956,13 @@ function TaskEditor({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const errs = validarTarea(tarea as any as Subtarea);
+    setError({});
+    // El borrador guarda las horas como texto; la validación las necesita en número.
+    const horas = timeToHours(tarea.estimacion as string);
+    const errs = validarTarea(
+      { ...tarea, estimacion: horas } as unknown as Subtarea,
+      evento.fechaInicio,
+    );
     if (Object.keys(errs).length > 0) {
       setError(errs);
       return;
@@ -2308,74 +2974,96 @@ function TaskEditor({
     if (typeof resultado === "string") setError({ general: resultado });
   };
   return (
-    <form className="card card-pad" onSubmit={submit}>
-      <div
-        className="form-grid"
-        style={{ gridTemplateColumns: "repeat(3, minmax(0,1fr))" }}
-      >
-        <div className="field" style={{ gridColumn: "1 / -1" }}>
-          <label>
+    <form className="card card-pad task-editor" onSubmit={submit} noValidate>
+      <div className="task-editor-grid">
+        <div className="field full">
+          <label htmlFor="gestion-titulo">
             Qué hay que hacer <span className="req">*</span>
           </label>
-          {error.titulo && <div className="field-error">{error.titulo}</div>}
+          {error.titulo && (
+            <ErrorCampo id="gestion-titulo-error">{error.titulo}</ErrorCampo>
+          )}
           <input
+            id="gestion-titulo"
             className={error.titulo ? "error" : ""}
             value={tarea.titulo}
+            autoComplete="off"
+            aria-invalid={Boolean(error.titulo)}
+            aria-describedby={error.titulo ? "gestion-titulo-error" : undefined}
             onChange={(e) => setTarea({ ...tarea, titulo: e.target.value })}
             autoFocus
           />
         </div>
         <div className="field">
-          <label>
+          <label htmlFor="gestion-fecha">
             Fecha límite <span className="req">*</span>
           </label>
           {error.fechaLimite && (
-            <div className="field-error">{error.fechaLimite}</div>
+            <ErrorCampo id="gestion-fecha-error">{error.fechaLimite}</ErrorCampo>
           )}
           <input
+            id="gestion-fecha"
             type="date"
             className={error.fechaLimite ? "error" : ""}
             data-testid="task-deadline-input"
+            max={evento.fechaInicio}
             value={tarea.fechaLimite}
+            aria-invalid={Boolean(error.fechaLimite)}
+            aria-describedby={
+              error.fechaLimite ? "gestion-fecha-error" : "gestion-fecha-ayuda"
+            }
             onChange={(e) =>
               setTarea({ ...tarea, fechaLimite: e.target.value })
             }
           />
+          <small className="field-hint" id="gestion-fecha-ayuda">
+            Máximo {fechaBonita(evento.fechaInicio, true)}: el evento empieza ese día.
+          </small>
         </div>
         <div className="field">
-          <label>
+          <label htmlFor="gestion-hora">
             Hora límite <span className="req">*</span>
           </label>
           {error.horaLimite && (
-            <div className="field-error">{error.horaLimite}</div>
+            <ErrorCampo id="gestion-hora-error">{error.horaLimite}</ErrorCampo>
           )}
           <input
+            id="gestion-hora"
             type="time"
             className={error.horaLimite ? "error" : ""}
             value={tarea.horaLimite}
+            aria-invalid={Boolean(error.horaLimite)}
+            aria-describedby={error.horaLimite ? "gestion-hora-error" : undefined}
             onChange={(e) => setTarea({ ...tarea, horaLimite: e.target.value })}
           />
         </div>
+        <CampoHoras
+          id="gestion-estimacion"
+          testId="task-estimacion"
+          valor={tarea.estimacion as string}
+          error={error.estimacion}
+          onChange={(valor) => setTarea({ ...tarea, estimacion: valor })}
+        />
         <div className="field">
-          <label>
-            Estimación (horas) <span className="req">*</span>
-          </label>
-          {error.estimacion && (
-            <div className="field-error">{error.estimacion}</div>
-          )}
-          <input
-            type="text"
-            pattern="[0-9]{2}:[0-9]{2}"
-            placeholder="00:00"
-            maxLength={5}
-            className={error.estimacion ? "error" : ""}
-            value={tarea.estimacion}
-            onChange={(e) => setTarea({ ...tarea, estimacion: e.target.value })}
-            aria-label="Estimación de la gestión en horas y minutos"
-          />
+          <label htmlFor="gestion-categoria">Categoría</label>
+          <select
+            id="gestion-categoria"
+            value={tarea.categoria}
+            onChange={(e) => setTarea({ ...tarea, categoria: e.target.value })}
+          >
+            {CATEGORIAS_GESTION.map((c) => (
+              <option key={c.valor} value={c.valor}>
+                {c.etiqueta}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
-      {error.general && <div className="error-box">{error.general}</div>}
+      {error.general && (
+        <div className="error-box" role="alert">
+          {error.general}
+        </div>
+      )}
       <div className="form-actions">
         <button
           type="button"
@@ -2535,6 +3223,7 @@ function EventoEditorDialog({
   onClose: () => void;
   onSave: (payload: EventoPayload) => Promise<boolean>;
 }) {
+  const { limiteDiario } = useStore();
   const [datos, setDatos] = useState<FormEvento>(() => ({
     nombre: evento.nombre,
     tipo: evento.tipo,
@@ -2549,16 +3238,21 @@ function EventoEditorDialog({
   const [guardando, setGuardando] = useState(false);
 
   const setCampo = (campo: keyof FormEvento, valor: string) => {
-    setDatos((d) => ({ ...d, [campo]: valor }));
+    // Mover el inicio arrastra el fin para no dejar una fecha inválida.
+    setDatos((d) => {
+      const siguiente = { ...d, [campo]: valor };
+      if (campo === "fechaInicio" && siguiente.fechaFin < valor) {
+        return { ...siguiente, fechaFin: valor };
+      }
+      return siguiente;
+    });
     setError((errs) => ({ ...errs, [campo]: "" }));
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const validacion = validarDatosEvento(datos, [], false);
-    if (!/^\d{2}:\d{2}$/.test(datos.duracion) || timeToHours(datos.duracion) <= 0) {
-      validacion.duracion = "Indica una duración válida (HH:MM).";
-    }
+    setError({});
+    const validacion = validarDatosEvento(datos, false);
     if (Object.keys(validacion).length > 0) {
       setError(validacion);
       return;
@@ -2566,7 +3260,7 @@ function EventoEditorDialog({
     setGuardando(true);
     const ok = await onSave({
       nombre: datos.nombre.trim(),
-      tipo: datos.tipo,
+      tipo: datos.tipo.trim() || "Otro",
       fechaInicio: datos.fechaInicio,
       fechaFin: datos.fechaFin,
       horaEvento: datos.horaEvento,
@@ -2574,6 +3268,7 @@ function EventoEditorDialog({
       lugar: datos.lugar.trim(),
       notas: datos.notas.trim(),
       capacidadDiaria: evento.capacidadDiaria,
+      cancelado: evento.cancelado,
     });
     setGuardando(false);
     if (ok) onClose();
@@ -2583,8 +3278,7 @@ function EventoEditorDialog({
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
       <form
-        className="dialog"
-        style={{ width: "min(680px, 100%)" }}
+        className="dialog dialog-evento"
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
         noValidate
@@ -2596,21 +3290,25 @@ function EventoEditorDialog({
           </div>
           <div className="form-grid">
             <div className="field full">
-              <label>
+              <label htmlFor="editar-nombre">
                 Nombre <span className="req">*</span>
               </label>
               {error.nombre && (
-                <div className="field-error">{error.nombre}</div>
+                <ErrorCampo id="editar-nombre-error">{error.nombre}</ErrorCampo>
               )}
               <input
+                id="editar-nombre"
                 className={error.nombre ? "error" : ""}
                 value={datos.nombre}
+                aria-invalid={Boolean(error.nombre)}
+                aria-describedby={error.nombre ? "editar-nombre-error" : undefined}
                 onChange={(e) => setCampo("nombre", e.target.value)}
               />
             </div>
             <div className="field">
-              <label>Tipo</label>
+              <label htmlFor="editar-tipo">Tipo</label>
               <select
+                id="editar-tipo"
                 value={tipoPersonalizado ? "Otro" : datos.tipo}
                 onChange={(e) =>
                   setCampo(
@@ -2624,92 +3322,119 @@ function EventoEditorDialog({
                     {tipo}
                   </option>
                 ))}
-                <option value="Otro">Otro...</option>
+                <option value="Otro">Otro…</option>
               </select>
             </div>
             <div className="field">
-              <label>
+              <label htmlFor="editar-lugar">
                 Lugar <span className="req">*</span>
               </label>
-              {error.lugar && <div className="field-error">{error.lugar}</div>}
+              {error.lugar && (
+                <ErrorCampo id="editar-lugar-error">{error.lugar}</ErrorCampo>
+              )}
               <input
+                id="editar-lugar"
                 className={error.lugar ? "error" : ""}
                 value={datos.lugar}
+                aria-invalid={Boolean(error.lugar)}
+                aria-describedby={error.lugar ? "editar-lugar-error" : undefined}
                 onChange={(e) => setCampo("lugar", e.target.value)}
               />
             </div>
             {tipoPersonalizado && (
               <div className="field full">
+                <label htmlFor="editar-tipo-personalizado">
+                  Escribe el tipo del evento
+                </label>
+                {error.tipo && (
+                  <ErrorCampo id="editar-tipo-error">{error.tipo}</ErrorCampo>
+                )}
                 <input
-                  placeholder="Escribe el tipo personalizado..."
+                  id="editar-tipo-personalizado"
+                  className={error.tipo ? "error" : ""}
+                  placeholder="Por ejemplo: Aniversario"
                   value={datos.tipo}
+                  aria-invalid={Boolean(error.tipo)}
+                  aria-describedby={error.tipo ? "editar-tipo-error" : undefined}
                   onChange={(e) => setCampo("tipo", e.target.value)}
                 />
               </div>
             )}
             <div className="field">
-              <label>
-                Inicio <span className="req">*</span>
+              <label htmlFor="editar-inicio">
+                Fecha de inicio <span className="req">*</span>
               </label>
               {error.fechaInicio && (
-                <div className="field-error">{error.fechaInicio}</div>
+                <ErrorCampo id="editar-inicio-error">
+                  {error.fechaInicio}
+                </ErrorCampo>
               )}
               <input
+                id="editar-inicio"
                 type="date"
                 className={error.fechaInicio ? "error" : ""}
                 value={datos.fechaInicio}
+                aria-invalid={Boolean(error.fechaInicio)}
+                aria-describedby={
+                  error.fechaInicio ? "editar-inicio-error" : undefined
+                }
                 onChange={(e) => setCampo("fechaInicio", e.target.value)}
               />
             </div>
             <div className="field">
-              <label>
-                Fin <span className="req">*</span>
+              <label htmlFor="editar-fin">
+                Fecha de fin <span className="req">*</span>
               </label>
               {error.fechaFin && (
-                <div className="field-error">{error.fechaFin}</div>
+                <ErrorCampo id="editar-fin-error">{error.fechaFin}</ErrorCampo>
               )}
               <input
+                id="editar-fin"
                 type="date"
+                min={datos.fechaInicio || undefined}
                 className={error.fechaFin ? "error" : ""}
                 value={datos.fechaFin}
+                aria-invalid={Boolean(error.fechaFin)}
+                aria-describedby={
+                  error.fechaFin ? "editar-fin-error" : "editar-fin-ayuda"
+                }
                 onChange={(e) => setCampo("fechaFin", e.target.value)}
               />
+              <small className="field-hint" id="editar-fin-ayuda">
+                No puede ser anterior al inicio.
+              </small>
             </div>
             <div className="field">
-              <label>
-                Hora <span className="req">*</span>
+              <label htmlFor="editar-hora">
+                Hora de inicio <span className="req">*</span>
               </label>
               {error.horaEvento && (
-                <div className="field-error">{error.horaEvento}</div>
+                <ErrorCampo id="editar-hora-error">{error.horaEvento}</ErrorCampo>
               )}
               <input
+                id="editar-hora"
                 type="time"
                 className={error.horaEvento ? "error" : ""}
                 value={datos.horaEvento}
+                aria-invalid={Boolean(error.horaEvento)}
+                aria-describedby={
+                  error.horaEvento ? "editar-hora-error" : undefined
+                }
                 onChange={(e) => setCampo("horaEvento", e.target.value)}
               />
             </div>
-            <div className="field">
-              <label>
-                Duración (HH:MM) <span className="req">*</span>
-              </label>
-              {error.duracion && (
-                <div className="field-error">{error.duracion}</div>
-              )}
-              <input
-                type="text"
-                pattern="[0-9]{2}:[0-9]{2}"
-                placeholder="00:00"
-                maxLength={5}
-                className={error.duracion ? "error" : ""}
-                value={datos.duracion}
-                onChange={(e) => setCampo("duracion", e.target.value)}
-                aria-label="Duración del evento en horas y minutos"
-              />
-            </div>
+            <CampoDuracion
+              id="editar-duracion"
+              testId="editar-duracion"
+              valor={datos.duracion}
+              error={error.duracion}
+              limiteDiario={limiteDiario}
+              onChange={(valor) => setCampo("duracion", valor)}
+            />
             <div className="field full">
-              <label>Notas</label>
+              <label htmlFor="editar-notas">Notas de producción</label>
               <textarea
+                id="editar-notas"
                 value={datos.notas}
                 onChange={(e) => setCampo("notas", e.target.value)}
               />
@@ -2739,16 +3464,21 @@ function EventoEditorDialog({
 
 function ReprogramarDialog({
   tarea,
+  evento,
   onClose,
 }: {
   tarea: Subtarea;
+  /** El evento dueño, para limitar la fecha al inicio del evento. */
+  evento?: Evento;
   onClose: () => void;
 }) {
   const { reprogramarSubtarea, resolverConflictoSubtarea } = useStore();
   const [fecha, setFecha] = useState(tarea.fechaLimite);
   const [hora, setHora] = useState(tarea.horaLimite);
-  const [estimacion, setEstimacion] = useState(String(tarea.estimacion));
+  const [estimacion, setEstimacion] = useState(hoursToTime(tarea.estimacion));
+  const [motivo, setMotivo] = useState(tarea.motivoMovimiento ?? "");
   const [error, setError] = useState("");
+  const [errores, setErrores] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState(false);
   const [conflicto, setConflicto] = useState<ConflictoSobrecarga | null>(null);
   const [avisoPersistencia, setAvisoPersistencia] = useState("");
@@ -2756,25 +3486,26 @@ function ReprogramarDialog({
     null,
   );
   const conflictoRef = useRef<HTMLDivElement>(null);
-  const estimacionNumerica = Number(estimacion);
+  const estimacionNumerica = timeToHours(estimacion);
 
   const intentarGuardar = async (fechaPropuesta: string, horas: number) => {
-    const problema = validarTarea({
-      ...tarea,
-      fechaLimite: fechaPropuesta,
-      horaLimite: hora,
-      estimacion: horas,
-    });
+    const problema = validarTarea(
+      { ...tarea, fechaLimite: fechaPropuesta, horaLimite: hora, estimacion: horas },
+      evento?.fechaInicio,
+    );
     if (Object.keys(problema).length > 0) {
-      setError(Object.values(problema).join(" "));
+      setErrores(problema);
+      setError("");
       return;
     }
+    setErrores({});
     setGuardando(true);
     setError("");
     const res = await reprogramarSubtarea(tarea.id, {
       fechaLimite: fechaPropuesta,
       horaLimite: hora,
       estimacion: horas,
+      motivoMovimiento: motivo.trim(),
     });
     setGuardando(false);
     if (res.ok) {
@@ -2792,8 +3523,10 @@ function ReprogramarDialog({
 
   const confirmar = (e: FormEvent) => {
     e.preventDefault();
-    if (!Number.isFinite(estimacionNumerica) || estimacionNumerica <= 0) {
-      setError("La estimación debe ser mayor que 0 horas.");
+    if (!esHorasValidas(estimacion)) {
+      setErrores({
+        estimacion: "Indica una estimación entre 30 minutos y 24 h (HH:MM).",
+      });
       return;
     }
     void intentarGuardar(fecha, estimacionNumerica);
@@ -2898,57 +3631,109 @@ function ReprogramarDialog({
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
       <form
-        className="dialog"
+        className="dialog dialog-mover"
         onSubmit={confirmar}
         onMouseDown={(e) => e.stopPropagation()}
+        noValidate
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mover-titulo"
       >
         <div className="dialog-body">
           <div className="dialog-title">
-            <h2>Reprogramar gestión</h2>
+            <h2 id="mover-titulo">Mover gestión</h2>
             <p>{tarea.titulo}</p>
           </div>
-          <div className="form-grid">
+          <div className="mover-grid">
             <div className="field">
-              <label htmlFor="reprogramar-fecha">Nuevo plazo</label>
+              <label htmlFor="reprogramar-fecha">
+                Nueva fecha límite <span className="req">*</span>
+              </label>
+              {errores.fechaLimite && (
+                <ErrorCampo id="reprogramar-fecha-error">
+                  {errores.fechaLimite}
+                </ErrorCampo>
+              )}
               <input
                 id="reprogramar-fecha"
                 type="date"
+                max={evento?.fechaInicio}
                 value={fecha}
                 data-testid="reprogramar-fecha"
+                className={errores.fechaLimite ? "error" : ""}
+                aria-invalid={Boolean(errores.fechaLimite)}
+                aria-describedby={
+                  errores.fechaLimite
+                    ? "reprogramar-fecha-error"
+                    : evento
+                      ? "reprogramar-fecha-ayuda"
+                      : undefined
+                }
                 onChange={(e) => {
                   setFecha(e.target.value);
+                  setErrores((x) => ({ ...x, fechaLimite: "" }));
                   setConflicto(null);
                   setAvisoPersistencia("");
                 }}
               />
+              {evento && (
+                <small className="field-hint" id="reprogramar-fecha-ayuda">
+                  No puede pasar del inicio del evento (
+                  {fechaBonita(evento.fechaInicio, true)}).
+                </small>
+              )}
             </div>
             <div className="field">
-              <label htmlFor="reprogramar-hora">Nueva hora</label>
+              <label htmlFor="reprogramar-hora">
+                Nueva hora límite <span className="req">*</span>
+              </label>
+              {errores.horaLimite && (
+                <ErrorCampo id="reprogramar-hora-error">
+                  {errores.horaLimite}
+                </ErrorCampo>
+              )}
               <input
                 id="reprogramar-hora"
                 type="time"
                 value={hora}
+                className={errores.horaLimite ? "error" : ""}
+                aria-invalid={Boolean(errores.horaLimite)}
+                aria-describedby={errores.horaLimite ? "reprogramar-hora-error" : undefined}
                 onChange={(e) => setHora(e.target.value)}
               />
             </div>
-          </div>
-          <div className="field reprogramar-estimacion-field">
-            <label htmlFor="reprogramar-estimacion">Esfuerzo estimado</label>
-            <div className="daily-capacity-input">
+            <CampoHoras
+              id="reprogramar-estimacion"
+              testId="reprogramar-estimacion"
+              valor={estimacion}
+              error={errores.estimacion}
+              onChange={(valor) => {
+                setEstimacion(valor);
+                setErrores((x) => ({ ...x, estimacion: "" }));
+                setConflicto(null);
+                setAvisoPersistencia("");
+              }}
+            />
+            <div className="field">
+              <label htmlFor="reprogramar-motivo">
+                Motivo del cambio{" "}
+                <span className="opcional">(opcional)</span>
+              </label>
               <input
-                id="reprogramar-estimacion"
-                data-testid="reprogramar-estimacion"
-                type="number"
-                min="0.25"
-                step="0.25"
-                value={estimacion}
-                onChange={(e) => {
-                  setEstimacion(e.target.value);
-                  setConflicto(null);
-                  setAvisoPersistencia("");
-                }}
+                id="reprogramar-motivo"
+                data-testid="reprogramar-motivo"
+                type="text"
+                maxLength={500}
+                value={motivo}
+                placeholder="ej. el salón se liberó más tarde"
+                autoComplete="off"
+                aria-describedby="reprogramar-motivo-ayuda"
+                onChange={(e) => setMotivo(e.target.value)}
               />
-              <span>horas</span>
+              <small className="field-hint" id="reprogramar-motivo-ayuda">
+                Puedes mover la gestión sin escribirlo. Queda anotado junto a la
+                gestión.
+              </small>
             </div>
           </div>
           {avisoPersistencia && (
@@ -2956,7 +3741,11 @@ function ReprogramarDialog({
               {avisoPersistencia}
             </div>
           )}
-          {error && <div className="error-box">{error}</div>}
+          {error && (
+            <div className="error-box" role="alert">
+              {error}
+            </div>
+          )}
         </div>
         <div className="form-actions">
           <button
@@ -2971,7 +3760,7 @@ function ReprogramarDialog({
             className="button button-primary"
             disabled={guardando}
           >
-            {guardando ? "Guardando…" : "Confirmar"}
+            {guardando ? "Guardando…" : "Mover gestión"}
           </button>
         </div>
       </form>
@@ -3076,12 +3865,16 @@ function ReprogramarDialog({
                       <input
                         id="reprogramar-estimacion-conflicto"
                         data-testid="reprogramar-estimacion-conflicto"
-                        type="number"
-                        min="0.25"
-                        step="0.25"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={5}
+                        placeholder="00:00"
                         value={estimacion}
-                        onChange={(e) => setEstimacion(e.target.value)}
                         aria-describedby="capacity-conflict-description"
+                        onChange={(e) => {
+                          setEstimacion(normalizarHoras(e.target.value));
+                          setErrores((x) => ({ ...x, estimacion: "" }));
+                        }}
                       />
                       <span>h</span>
                       <button
@@ -3090,8 +3883,7 @@ function ReprogramarDialog({
                         onClick={() => void aplicarReduccion()}
                         disabled={
                           guardando ||
-                          !Number.isFinite(estimacionNumerica) ||
-                          estimacionNumerica <= 0 ||
+                          !esHorasValidas(estimacion) ||
                           estimacionNumerica === estimacionConflicto
                         }
                         data-testid="apply-reduced-estimation"
@@ -3118,6 +3910,7 @@ function ReprogramarDialog({
   );
 }
 
+
 function Progreso() {
   const { eventos } = useStore();
   if (!eventos.length)
@@ -3143,6 +3936,7 @@ function Progreso() {
 
   const porcentajeGlobal =
     totalTareas === 0 ? 0 : Math.round((tareasCompletadas / totalTareas) * 100);
+  const eventosCancelados = eventos.filter((e) => e.cancelado).length;
 
   return (
     <div>
@@ -3226,6 +4020,32 @@ function Progreso() {
                 </span>
               </div>
             </div>
+            <div className="card card-pad">
+              <div
+                style={{
+                  color: "var(--apagado)",
+                  fontSize: "12px",
+                  marginBottom: "10px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  fontWeight: 500,
+                }}
+              >
+                Eventos Cancelados
+              </div>
+              <div
+                style={{
+                  fontSize: "42px",
+                  color: "var(--ambar)",
+                  fontWeight: 300,
+                }}
+              >
+                {eventosCancelados}{" "}
+                <span style={{ fontSize: "16px", color: "#555" }}>
+                  / {totalEventos}
+                </span>
+              </div>
+            </div>
           </div>
           <h3
             style={{
@@ -3246,7 +4066,7 @@ function Progreso() {
                   key={e.id}
                   className="task-row"
                   style={{
-                    gridTemplateColumns: "minmax(0,1fr) auto",
+                    gridTemplateColumns: "minmax(0,1fr) minmax(210px, 280px)",
                     padding: "16px 20px",
                     cursor: "pointer",
                     textDecoration: "none",
@@ -3263,20 +4083,17 @@ function Progreso() {
                     >
                       {e.nombre}
                     </div>
-                    <div style={{ fontSize: "13px", color: "var(--apagado)" }}>
-                      {e.subtareas.filter((t) => t.estado === "hecho").length}{" "}
-                      de {e.subtareas.length} gestiones completadas
+                    <div
+                      style={{
+                        fontSize: "24px",
+                        color: p === 100 ? "var(--salvia)" : "#e0e0e0",
+                        fontWeight: 300,
+                      }}
+                    >
+                      {p}%
                     </div>
                   </div>
-                  <div
-                    style={{
-                      fontSize: "24px",
-                      color: p === 100 ? "var(--salvia)" : "#e0e0e0",
-                      fontWeight: 300,
-                    }}
-                  >
-                    {p}%
-                  </div>
+                  <BarraProgresoEvento evento={e} compacta />
                 </Link>
               );
             })}
@@ -3383,6 +4200,7 @@ function LoginPage() {
         >
           <form
             onSubmit={enviar}
+            noValidate
             style={{ display: "flex", flexDirection: "column", gap: 20 }}
           >
             <div className="field">
@@ -3612,6 +4430,7 @@ function RegisterPage() {
         >
           <form
             onSubmit={handleSubmit}
+            noValidate
             style={{ display: "flex", flexDirection: "column", gap: 15 }}
           >
             <div className="field">
@@ -3902,9 +4721,9 @@ function RecuperarPasswordPage() {
                   border: "1px solid var(--salvia)",
                 }}
               >
-                Por ahora la recuperación automática por correo no está
-                disponible. Pídele al administrador del sistema que restablezca
-                tu contraseña.
+                Anotamos el correo <strong>{correo.trim()}</strong>. La
+                recuperación automática todavía no está disponible: pide al
+                administrador del sistema que restablezca esa contraseña.
               </p>
               <button
                 onClick={() => setLocation("/login")}
@@ -3923,7 +4742,7 @@ function RecuperarPasswordPage() {
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} noValidate>
               <div
                 className="field"
                 style={{ marginBottom: 20, textAlign: "left" }}
@@ -3989,7 +4808,7 @@ function RecuperarPasswordPage() {
                   marginBottom: 16,
                 }}
               >
-                Enviar enlace de recuperación
+                Solicitar restablecimiento
               </button>
 
               <div style={{ textAlign: "center" }}>
@@ -4002,7 +4821,7 @@ function RecuperarPasswordPage() {
                     fontWeight: 500,
                   }}
                 >
-                  ← Volver al inicio de sesión
+                  â† Volver al inicio de sesión
                 </span>
               </div>
             </form>
