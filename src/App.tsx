@@ -1916,34 +1916,38 @@ function CrearEvento() {
   const [errorTareas, setErrorTareas] = useState<Record<string, ErrorTarea>>({});
   const [error, setError] = useState<Record<string, string>>({});
   const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false);
+  /** Última fecha de inicio vista, para mover el plan con el evento. */
+  const inicioAnteriorRef = useRef(datos.fechaInicio);
 
-  // Al mover la fecha de inicio, el fin y los plazos se recolocan solos para no
-  // dejar valores que el servidor no acepta.
+  /**
+   * Al mover las fechas del evento, el plan se mueve con él (mismo delta de
+   * días) para que la validación trabaje con lo último que escribió el
+   * organizador; los plazos nunca quedan después del inicio.
+   */
   useEffect(() => {
+    const anterior = inicioAnteriorRef.current;
+    inicioAnteriorRef.current = datos.fechaInicio;
+    if (!anterior || !datos.fechaInicio) return;
+    const delta = diferenciaDias(anterior, datos.fechaInicio);
+    if (delta === 0) return;
     setDatos((d) =>
       d.fechaFin && d.fechaFin < d.fechaInicio
         ? { ...d, fechaFin: d.fechaInicio }
         : d,
     );
+    const reubicar = (fecha: string) => {
+      if (!fecha) return datos.fechaInicio;
+      const nueva = sumarDias(fecha, delta);
+      return nueva > datos.fechaInicio ? datos.fechaInicio : nueva;
+    };
     setTareas((actuales) =>
-      actuales.map((t) => ({
-        ...t,
-        fechaLimite: !t.fechaLimite || t.fechaLimite > datos.fechaInicio
-          ? datos.fechaInicio
-          : t.fechaLimite,
-      })),
+      actuales.map((t) => ({ ...t, fechaLimite: reubicar(t.fechaLimite) })),
     );
-    setNuevo((n) => ({
-      ...n,
-      fechaLimite:
-        !n.fechaLimite || n.fechaLimite > datos.fechaInicio
-          ? datos.fechaInicio
-          : n.fechaLimite,
-    }));
-    // Los plazos se acabaron de corregir: el aviso de plazo ya no aplica.
+    setNuevo((n) => ({ ...n, fechaLimite: reubicar(n.fechaLimite) }));
+    // La reubicación cambia los avisos del plan: los anteriores quedan obsoletos.
     setError((errs) => {
       const restantes = Object.entries(errs).filter(
-        ([campo]) => !campo.startsWith("plan:"),
+        ([campo]) => !campo.startsWith("plan:") && campo !== "general",
       );
       return restantes.length ? Object.fromEntries(restantes) : {};
     });
@@ -1952,6 +1956,18 @@ function CrearEvento() {
   const setCampo = (campo: keyof FormEvento, valor: string) => {
     setDatos((d) => ({ ...d, [campo]: valor }));
     setError((errs) => ({ ...errs, [campo]: "" }));
+    // Cambió la información del evento: los avisos del plan se recalculan.
+    limpiarAvisosDelPlan();
+  };
+
+  /** Al tocar el plan, los avisos del último intento de envío dejan de aplicar. */
+  const limpiarAvisosDelPlan = () => {
+    setError((errs) => {
+      const restantes = Object.entries(errs).filter(
+        ([campo]) => !campo.startsWith("plan:") && campo !== "general",
+      );
+      return restantes.length ? Object.fromEntries(restantes) : {};
+    });
   };
 
   // Al corregir el campo, su mensaje desaparece; al mover el inicio del evento
@@ -1959,12 +1975,13 @@ function CrearEvento() {
   const actualizarTarea = (id: string, cambios: Partial<BorradorTarea>) => {
     setTareas((ts) => ts.map((t) => (t.id === id ? { ...t, ...cambios } : t)));
     setErrorTareas((errs) => ({ ...errs, [id]: { ...errs[id] } }));
-    setError((errs) => ({ ...errs, [`plan:${id}`]: "" }));
+    limpiarAvisosDelPlan();
   };
 
   const quitarTarea = (id: string) => {
     setTareas((ts) => ts.filter((t) => t.id !== id));
     setErrorTareas(({ [id]: _quitada, ...resto }) => resto);
+    limpiarAvisosDelPlan();
   };
 
   /**
@@ -1977,12 +1994,7 @@ function CrearEvento() {
     setNuevo(borradorInicial(datos.fechaInicio));
     setErrorTareas({});
     setErrorNuevo({});
-    setError((errs) => {
-      const restantes = Object.entries(errs).filter(
-        ([campo]) => !campo.startsWith("plan:") && campo !== "general",
-      );
-      return restantes.length ? Object.fromEntries(restantes) : {};
-    });
+    limpiarAvisosDelPlan();
     setMostrarPlan(false);
   };
 
@@ -1999,6 +2011,7 @@ function CrearEvento() {
   const limpiarNueva = () => {
     setNuevo(borradorInicial(datos.fechaInicio));
     setErrorNuevo({});
+    limpiarAvisosDelPlan();
   };
 
   const añadirTarea = () => {
@@ -2012,6 +2025,7 @@ function CrearEvento() {
     setErrorNuevo({});
     setTareas((ts) => [...ts, { ...nuevo, id: generarId("draft") }]);
     setNuevo(borradorInicial(datos.fechaInicio));
+    limpiarAvisosDelPlan();
   };
 
   const aplicarPlanPredefinido = (tipoPlan: string) => {
@@ -2080,6 +2094,7 @@ function CrearEvento() {
     }));
     setTareas(tareasNuevas);
     setErrorTareas({});
+    limpiarAvisosDelPlan();
   };
 
   const intentarSubmit = async (e: FormEvent) => {
@@ -2595,6 +2610,7 @@ function CrearEvento() {
                   onChange={(e) => {
                     setNuevo({ ...nuevo, titulo: e.target.value });
                     setErrorNuevo((errs) => ({ ...errs, titulo: "" }));
+                    limpiarAvisosDelPlan();
                   }}
                 />
               </div>
@@ -2608,6 +2624,7 @@ function CrearEvento() {
                   onChange={(valor) => {
                     setNuevo({ ...nuevo, estimacion: valor });
                     setErrorNuevo((errs) => ({ ...errs, estimacion: "" }));
+                    limpiarAvisosDelPlan();
                   }}
                 />
                 <div className="field">
@@ -2651,6 +2668,7 @@ function CrearEvento() {
                     onChange={(e) => {
                       setNuevo({ ...nuevo, fechaLimite: e.target.value });
                       setErrorNuevo((errs) => ({ ...errs, fechaLimite: "" }));
+                      limpiarAvisosDelPlan();
                     }}
                   />
                   <small className="field-hint" id="plan-nuevo-fecha-ayuda">
@@ -2679,6 +2697,7 @@ function CrearEvento() {
                     onChange={(e) => {
                       setNuevo({ ...nuevo, horaInicio: e.target.value });
                       setErrorNuevo((errs) => ({ ...errs, horaInicio: "" }));
+                      limpiarAvisosDelPlan();
                     }}
                   />
                 </div>
