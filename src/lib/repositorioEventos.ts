@@ -1,11 +1,10 @@
-import { api, mensajeDeError, obtenerToken } from "@/services/api";
+﻿import { api, mensajeDeError } from "@/services/api";
 
-export type EstadoSubtarea =
-  | "pendiente"
-  | "en_progreso"
-  | "hecho"
-  | "pospuesta";
+export type EstadoSubtarea = "pendiente" | "en_progreso" | "hecho";
 export type Prioridad = "alta" | "media" | "baja";
+
+/** Clasificación que calcula el servidor para los filtros de /eventos. */
+export type EstadoAgenda = "activo" | "pasado" | "retrasado" | "cancelado";
 
 export type Subtarea = {
   id: string;
@@ -17,8 +16,8 @@ export type Subtarea = {
   horaLimite: string;
   horaInicio?: string;
   estimacion: number;
-  /** Motivo de la posposición ("pospuesta"). Vacío cuando no aplica. */
-  notaPospuesta?: string;
+  /** Motivo del último movimiento (opcional). */
+  motivoMovimiento?: string;
 };
 
 export type FechaSugerida = {
@@ -65,6 +64,10 @@ export type Evento = {
   notas: string;
   capacidadDiaria: number;
   horasPlanificadas: number;
+  /** Un evento cancelado deja de generar trabajo pendiente. */
+  cancelado: boolean;
+  /** Clasificación del servidor; se recalcula en el cliente si aún no viene. */
+  estadoAgenda: EstadoAgenda;
   subtareas: Subtarea[];
   creadoEn: string;
 };
@@ -72,30 +75,19 @@ export type Evento = {
 /** Datos editables de un evento (lo que se envía al API). */
 export type EventoPayload = Omit<
   Evento,
-  "id" | "subtareas" | "creadoEn" | "horasPlanificadas"
+  "id" | "subtareas" | "creadoEn" | "horasPlanificadas" | "estadoAgenda"
 >;
 
 /**
  * Fallo de una operación. `codigo` permite reaccionar a causas concretas sin
- * parsear el mensaje (por ejemplo, un servidor que aún no conoce un estado).
+ * parsear el mensaje (por ejemplo, un servidor que aún no conoce un campo).
  */
 export type Resultado<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; codigo?: string };
 
-/** Código de fallo: el servidor rechazó el estado "pospuesta" en el campo `estado`. */
-export const CODIGO_ESTADO_POSPUESTA = "ESTADO_POSPUESTA_NO_SOPORTADO";
-
-/**
- * Detecta el 400 de DRF cuando el campo `estado` no acepta todavía el valor
- * "pospuesta" (`{"estado": ["\"pospuesta\" is not a valid choice."]}`).
- */
-export function esEstadoPospuestaRechazado(error: any): boolean {
-  const datos = error?.response?.data;
-  if (!datos || error?.response?.status !== 400) return false;
-  const texto = JSON.stringify(datos).toLowerCase();
-  return texto.includes("pospuesta") && texto.includes("estado");
-}
+/** Código de fallo: el servidor rechazó un dato que aún no conoce. */
+export const CODIGO_DATOS_NO_SOPORTADOS = "DATOS_NO_SOPORTADOS";
 
 function hoy(): string {
   const fecha = new Date();
@@ -136,6 +128,17 @@ export function generarId(prefijo: string): string {
 }
 
 // Funciones de mapeo
+/**
+ * Réplica local de `EventoSerializer.get_estado_agenda`. Solo se usa si el
+ * servidor todavía no envía `estado_agenda`; cuando llega, manda el servidor.
+ */
+function calcularEstadoAgenda(e: any, fechaInicio: string): EstadoAgenda {
+  if (e.cancelado) return "cancelado";
+  if (diferenciaDias(hoyISO(), fechaInicio) >= 0) return "activo";
+  const abiertas = (e.subtareas || []).filter((t: any) => t.estado !== "hecho");
+  return abiertas.length ? "retrasado" : "pasado";
+}
+
 function mapEventoFromApi(e: any): Evento {
   return {
     id: e.id.toString(),
@@ -149,6 +152,8 @@ function mapEventoFromApi(e: any): Evento {
     notas: e.notas_produccion || "",
     capacidadDiaria: Number(e.limite_diario_horas),
     horasPlanificadas: Number(e.horas_planificadas ?? 0),
+    cancelado: Boolean(e.cancelado),
+    estadoAgenda: e.estado_agenda ?? calcularEstadoAgenda(e, e.fecha_inicio),
     creadoEn: e.creado_en ? e.creado_en.slice(0, 10) : hoyISO(),
     subtareas: (e.subtareas || []).map(mapSubtareaFromApi),
   };
@@ -164,7 +169,7 @@ function mapSubtareaFromApi(t: any): Subtarea {
     horaLimite: t.hora_limite.slice(0, 5),
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
-    notaPospuesta: t.nota_pospuesta ?? "",
+    motivoMovimiento: t.motivo_movimiento ?? "",
   };
 }
 
@@ -204,6 +209,7 @@ function mapEventoToApi(e: EventoPayload) {
     duracion_horas: e.duracion,
     limite_diario_horas: e.capacidadDiaria,
     notas_produccion: e.notas,
+    cancelado: e.cancelado,
   };
 }
 
@@ -218,10 +224,13 @@ function mapSubtareaToApi(eventoId: string, t: Omit<Subtarea, "id">) {
     plazo: t.fechaLimite,
     hora_limite: t.horaLimite,
     hora_inicio: t.horaInicio || null,
-    // Un servidor que aún no tenga el campo simplemente lo ignora (DRF descarta
-    // las claves no declaradas), así que enviarlo nunca rompe la petición.
-    nota_pospuesta: t.notaPospuesta ?? "",
+    motivo_movimiento: t.motivoMovimiento ?? "",
   };
+}
+
+/** Traduce el fallo del servidor a un mensaje que pueda leer el organizador. */
+function errorDe(e: any, porDefecto: string): string {
+  return e.response?.data ? mensajeDeError(e.response.data) : porDefecto;
 }
 
 export const repositorioEventos = {
@@ -245,12 +254,7 @@ export const repositorioEventos = {
       const response = await api.post("/eventos/", mapEventoToApi(evento));
       return { ok: true, data: mapEventoFromApi(response.data) };
     } catch (e: any) {
-      return {
-        ok: false,
-        error: e.response?.data
-          ? JSON.stringify(e.response.data)
-          : "Error al crear evento.",
-      };
+      return { ok: false, error: errorDe(e, "No se pudo crear el evento.") };
     }
   },
 
@@ -262,12 +266,7 @@ export const repositorioEventos = {
       const response = await api.put(`/eventos/${id}/`, mapEventoToApi(evento));
       return { ok: true, data: mapEventoFromApi(response.data) };
     } catch (e: any) {
-      return {
-        ok: false,
-        error: e.response?.data
-          ? JSON.stringify(e.response.data)
-          : "Error al actualizar evento.",
-      };
+      return { ok: false, error: errorDe(e, "No se pudo actualizar el evento.") };
     }
   },
 
@@ -276,7 +275,7 @@ export const repositorioEventos = {
       await api.delete(`/eventos/${id}/`);
       return { ok: true, data: true };
     } catch (e: any) {
-      return { ok: false, error: "Error al eliminar evento." };
+      return { ok: false, error: errorDe(e, "No se pudo eliminar el evento.") };
     }
   },
 
@@ -291,12 +290,7 @@ export const repositorioEventos = {
       );
       return { ok: true, data: mapSubtareaFromApi(response.data) };
     } catch (e: any) {
-      return {
-        ok: false,
-        error: e.response?.data
-          ? JSON.stringify(e.response.data)
-          : "Error al crear gestión.",
-      };
+      return { ok: false, error: errorDe(e, "No se pudo crear la gestión.") };
     }
   },
 
@@ -311,27 +305,25 @@ export const repositorioEventos = {
       );
       return { ok: true, data: mapSubtareaFromApi(response.data) };
     } catch (e: any) {
-      return {
-        ok: false,
-        error: e.response?.data
-          ? JSON.stringify(e.response.data)
-          : "Error al actualizar gestión.",
-        codigo: esEstadoPospuestaRechazado(e)
-          ? CODIGO_ESTADO_POSPUESTA
-          : undefined,
-      };
+      return { ok: false, error: errorDe(e, "No se pudo actualizar la gestión.") };
     }
   },
 
   async reprogramar(
     id: string,
-    cambios: { fechaLimite: string; horaLimite: string; estimacion: number },
+    cambios: {
+      fechaLimite: string;
+      horaLimite: string;
+      estimacion: number;
+      motivoMovimiento?: string;
+    },
   ): Promise<ResultadoReprogramacion> {
     try {
       const response = await api.patch(`/subtareas/${id}/reprogramar/`, {
         plazo: cambios.fechaLimite,
         hora_limite: cambios.horaLimite,
         estimacion_horas: cambios.estimacion,
+        motivo_movimiento: cambios.motivoMovimiento ?? "",
       });
       return { ok: true, data: mapSubtareaFromApi(response.data) };
     } catch (e: any) {
@@ -345,9 +337,10 @@ export const repositorioEventos = {
       return {
         ok: false,
         tipo: "error",
-        error: e.response?.data
-          ? mensajeDeError(e.response.data)
-          : "No se pudo reprogramar la gestión. Revisa tu conexión e inténtalo de nuevo.",
+        error: errorDe(
+          e,
+          "No se pudo mover la gestión. Revisa tu conexión e inténtalo de nuevo.",
+        ),
       };
     }
   },
@@ -382,9 +375,10 @@ export const repositorioEventos = {
     } catch (e: any) {
       return {
         ok: false,
-        error: e.response?.data
-          ? mensajeDeError(e.response.data)
-          : "No se pudo resolver el conflicto. Revisa tu conexión e inténtalo de nuevo.",
+        error: errorDe(
+          e,
+          "No se pudo resolver el conflicto. Revisa tu conexión e inténtalo de nuevo.",
+        ),
       };
     }
   },
@@ -394,7 +388,7 @@ export const repositorioEventos = {
       await api.delete(`/subtareas/${id}/`);
       return { ok: true, data: true };
     } catch (e: any) {
-      return { ok: false, error: "Error al eliminar gestión." };
+      return { ok: false, error: errorDe(e, "No se pudo eliminar la gestión.") };
     }
   },
 };
@@ -445,16 +439,32 @@ export function tareasGlobales(eventos: Evento[]) {
 }
 
 export function hoursToTime(h: number): string {
-  if (!h) return "00:00";
+  if (!h || !Number.isFinite(h) || h <= 0) return "00:00";
   const m = Math.round(h * 60);
   const hh = Math.floor(m / 60);
   const mm = m % 60;
   return hh.toString().padStart(2, "0") + ":" + mm.toString().padStart(2, "0");
 }
+
+/** ¿El texto tiene forma HH:MM y representa una cantidad de horas válida? */
+export function esHorasValidas(texto: string, maximoHoras = 24): boolean {
+  if (!/^\d{1,2}:\d{2}$/.test(texto.trim())) return false;
+  const horas = timeToHours(texto);
+  return Number.isFinite(horas) && horas > 0 && horas <= maximoHoras;
+}
+
+/**
+ * Convierte "HH:MM" a horas. Devuelve 0 (nunca `NaN`) si el texto no tiene
+ * forma HH:MM, para que una entrada inválida no acabe traveling al servidor.
+ */
 export function timeToHours(t: string): number {
-  if (!t) return 0;
-  const parts = t.split(":");
-  return Number((parseInt(parts[0]) + parseInt(parts[1]) / 60).toFixed(2));
+  const partes = (t || "").trim().split(":");
+  if (partes.length !== 2) return 0;
+  const [hh, mm] = partes.map((p) => parseInt(p, 10));
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || mm < 0 || mm > 59) {
+    return 0;
+  }
+  return Number((hh + mm / 60).toFixed(2));
 }
 
 // ---------------------------------------------------------------------------
@@ -488,7 +498,7 @@ function mapTareaHoyFromApi(t: any): TareaHoy {
     horaLimite: t.hora_limite.slice(0, 5),
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
-    notaPospuesta: t.nota_pospuesta ?? "",
+    motivoMovimiento: t.motivo_movimiento ?? "",
     eventoId: t.evento.id.toString(),
     eventoNombre: t.evento.nombre,
   };
@@ -525,155 +535,3 @@ export const repositorioHoy = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// Capa local de posposiciones (Sprint 4)
-// ---------------------------------------------------------------------------
-// El estado "pospuesta" viaja a la API, pero el servidor se despliega por
-// detrás: mientras no acepte ese valor (400 en el campo `estado`) o no exponga
-// `nota_pospuesta`, la posposición se guarda en el navegador. Cuando el backend
-// lo soporte, la capa deja de intervenir porque el servidor ya devuelve el
-// estado final. Se aísla por cuenta con el token de sesión, igual que los datos
-// de la cuenta.
-
-const CLAVE_POSPUESTAS = "eventops_pospuestas";
-
-export type Pospusion = {
-  estado: "pospuesta";
-  notaPospuesta: string;
-  fechaLimite?: string;
-  registradaEn: string;
-};
-export type CapaPospuestas = Record<string, Pospusion>;
-
-function clavePospuestas(): string {
-  const token = obtenerToken();
-  return token ? `${CLAVE_POSPUESTAS}_${token}` : "";
-}
-
-export const repositorioPospuestas = {
-  leer(): CapaPospuestas {
-    const clave = clavePospuestas();
-    if (!clave) return {};
-    try {
-      const crudo = localStorage.getItem(clave);
-      if (!crudo) return {};
-      const datos = JSON.parse(crudo) as Record<string, any>;
-      if (!datos || typeof datos !== "object") return {};
-      const capa: CapaPospuestas = {};
-      for (const [id, valor] of Object.entries(datos)) {
-        if (valor?.estado !== "pospuesta") continue;
-        capa[id] = {
-          estado: "pospuesta",
-          notaPospuesta:
-            typeof valor.notaPospuesta === "string" ? valor.notaPospuesta : "",
-          fechaLimite:
-            typeof valor.fechaLimite === "string" ? valor.fechaLimite : undefined,
-          registradaEn:
-            typeof valor.registradaEn === "string" ? valor.registradaEn : "",
-        };
-      }
-      return capa;
-    } catch {
-      return {};
-    }
-  },
-
-  escribir(capa: CapaPospuestas) {
-    const clave = clavePospuestas();
-    if (!clave) return;
-    try {
-      if (!Object.keys(capa).length) localStorage.removeItem(clave);
-      else localStorage.setItem(clave, JSON.stringify(capa));
-    } catch {
-      // Navegación privada o cuota llena: la posposición sigue viva en el estado
-      // de la sesión, solo se pierde al recargar.
-    }
-  },
-
-  registrar(tareaId: string, datos: { notaPospuesta: string; fechaLimite?: string }) {
-    const capa = repositorioPospuestas.leer();
-    capa[tareaId] = {
-      estado: "pospuesta",
-      notaPospuesta: datos.notaPospuesta.trim(),
-      fechaLimite: datos.fechaLimite,
-      registradaEn: new Date().toISOString(),
-    };
-    repositorioPospuestas.escribir(capa);
-  },
-
-  borrar(tareaId: string) {
-    const capa = repositorioPospuestas.leer();
-    if (!(tareaId in capa)) return;
-    delete capa[tareaId];
-    repositorioPospuestas.escribir(capa);
-  },
-};
-
-/**
- * Mezcla la capa local sobre los eventos del servidor.
- *
- * Regla: "hecho" siempre gana (el servidor es la fuente de la verdad para lo
- * cerrado); si la capa dice "pospuesta" y el servidor solo conoce
- * pendiente/en progreso, se aplica la capa. Si el servidor ya devuelve
- * "pospuesta", la nota es la del servidor y la capa no interviene.
- */
-export function aplicarCapaPospuestas(
-  eventos: Evento[],
-  capa: CapaPospuestas,
-): Evento[] {
-  if (!Object.keys(capa).length) return eventos;
-  let cambio = false;
-  const actualizados = eventos.map((evento) => {
-    let cambioEvento = false;
-    const subtareas = evento.subtareas.map((tarea) => {
-      const pospusion = capa[tarea.id];
-      if (!pospusion) return tarea;
-      if (tarea.estado === "hecho" || tarea.estado === "pospuesta") return tarea;
-      cambioEvento = true;
-      return {
-        ...tarea,
-        estado: "pospuesta" as EstadoSubtarea,
-        notaPospuesta: pospusion.notaPospuesta,
-      };
-    });
-    if (!cambioEvento) return evento;
-    cambio = true;
-    return { ...evento, subtareas };
-  });
-  return cambio ? actualizados : eventos;
-}
-
-/**
- * Saca de la vista /hoy las gestiones pospuestas y recalcula el total, de modo
- * que la carga urgente baja en el acto, sin recargar la página.
- */
-export function filtrarHoyPorPospuestas(
-  respuesta: RespuestaHoy,
-  capa: CapaPospuestas,
-): RespuestaHoy {
-  if (!Object.keys(capa).length) return respuesta;
-  const esPospuesta = (tarea: TareaHoy) => Boolean(capa[tarea.id]);
-  const grupos: GruposHoy = {
-    vencidas: respuesta.grupos.vencidas.filter((t) => !esPospuesta(t)),
-    para_hoy: respuesta.grupos.para_hoy.filter((t) => !esPospuesta(t)),
-    proximas: respuesta.grupos.proximas.filter((t) => !esPospuesta(t)),
-  };
-  return {
-    ...respuesta,
-    total: grupos.vencidas.length + grupos.para_hoy.length + grupos.proximas.length,
-    grupos,
-  };
-}
-
-/** Gestiones pospuestas de todos los eventos, listas para pintarlas en la UI. */
-export function tareasPospuestas(eventos: Evento[]): TareaHoy[] {
-  return eventos.flatMap((evento) =>
-    evento.subtareas
-      .filter((t) => t.estado === "pospuesta")
-      .map((t) => ({
-        ...t,
-        eventoId: evento.id,
-        eventoNombre: evento.nombre,
-      })),
-  );
-}

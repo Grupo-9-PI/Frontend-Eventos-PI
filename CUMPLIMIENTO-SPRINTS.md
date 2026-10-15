@@ -334,3 +334,95 @@ en el cliente lo que el backend calcula (`horasPlanificadas`, Sprint 3).
 - Recuperación de contraseña: la pantalla existe, pero avisa que el restablecimiento lo hace el
   administrador (no hay servicio de correo en el alcance).
 - Despliegue del frontend: definir `VITE_API_URL` con la URL del backend en producción.
+
+---
+
+## Sprint 5 — Restricciones, formularios y mensajes
+
+Trabajo sobre el frontend existente: se reutilizaron los componentes, tokens y patrones ya
+presentes en lugar de introducir librerías nuevas. **El backend se amplió en tres puntos** que el
+frontend leía pero nunca recibía (`horas_planificadas`, `motivo_movimiento`, estado de evento
+cancelado); se documentan en el `CUMPLIMIENTO-SPRINTS.md` del backend.
+
+### 1. Se eliminó la opción «Posponer»
+
+El backend nunca la admitió: `Subtarea.OPCIONES_ESTADO` es `pendiente | en_progreso | hecho` y
+el campo `nota_pospuesta` no existía, así que la posposición se sostenía con una capa en
+`localStorage` y un reintento al recibir un 400. Al retirar la interfaz se retiraron también esa
+capa y ese reintento.
+
+| Se eliminó | Dónde |
+| --- | --- |
+| `PosponerDialog` y el botón «Posponer» de cada fila | `src/App.tsx` |
+| Bloque «Pospuestas» de `/hoy` y del detalle del evento | `src/App.tsx` |
+| `IndicadorPospuestas` sobre el contenido | `src/App.tsx` |
+| Tarjeta «Gestiones Pospuestas» de `/progreso` | `src/App.tsx` |
+| `repositorioPospuestas`, `aplicarCapaPospuestas`, `filtrarHoyPorPospuestas`, `tareasPospuestas`, `CODIGO_ESTADO_POSPUESTA`, `esEstadoPospuestaRechazado` y el estado `"pospuesta"` | `src/lib/repositorioEventos.ts` |
+| `.tag-pospuesta`, `.task-row.pospuesta`, `.posponer-dialog`, `.posponer-dates`, `.pospuestas-indicator` | `src/index.css` |
+
+El resto de opciones de gestión (mover, editar, eliminar, marcar hecha) se conservan sin cambios.
+
+### 2. Componentes reutilizables nuevos
+
+Están en `src/App.tsx` y se usan en todos los formularios, para que no haya dos versiones del
+mismo control:
+
+| Componente | Dónde se usa | Qué resuelve |
+| --- | --- | --- |
+| `CampoHoras` | Plan inicial, agregar/editar gestión, mover, diálogo de conflicto | Un único campo de horas estimado en `HH:MM` con máscara, ayuda y mensaje de error. |
+| `CampoDuracion` | Crear evento, editar evento | Desplegable de duraciones válidas (30 min a 24 h) que siempre incluye el valor actual. |
+| `IndicadorHoras` | `/hoy`, detalle del evento, `/opciones` | Un único mensaje «X h planificadas … de Y h», con el exceso cuando se pasa. |
+| `ErrorCampo` | Todos los formularios | Mensaje de error con `id` para `aria-describedby`. |
+
+### 3. Validaciones visibles que antes no existían
+
+| Regla | Antes | Ahora |
+| --- | --- | --- |
+| Plazo de una gestión ≤ inicio del evento | Sin validación; el servidor respondía 400 con el JSON crudo | `max` en el campo, recorte automático al mover el inicio, y el mensaje «No puede ser posterior al inicio del evento (…).» junto al campo. |
+| Fecha de fin ≥ fecha de inicio | Mensaje «Inválida.» | `min` en el campo, la fecha de fin sigue sola al inicio y el mensaje completo. |
+| Duración del evento | `pattern` que el navegador no aplicaba (`noValidate`); `NaN` pasaba la validación | Desplegable con opciones válidas, rango 30 min–24 h y mensaje. |
+| Límite diario | Cliente 1–16 h, servidor hasta 24 h | Cliente 1–24 h, igual que el servidor. |
+| Filtros de `/eventos` | «Cancelados» y «Retrasados» siempre vacíos con el mensaje «No hay eventos activos» | Filtros sobre `estado_agenda` del servidor, con mensaje propio por filtro. |
+
+### 4. Motivo opcional al mover una gestión
+
+`ReprogramarDialog` («Mover gestión») incorpora el campo **Motivo del cambio**, opcional, con
+ayuda y sin validación que lo vuelva obligatorio. Se envía como `motivo_movimiento` en
+`PATCH /api/subtareas/<id>/reprogramar/` y el backend ya lo persiste, así que se muestra en la
+fila de la gestión como nota.
+
+### 5. Estabilidad de la casilla de tarea
+
+`.task-check` heredaba `padding: 10px 11px` del `input` genérico y se centraba con
+`align-items: center` en un grid; al marcar, la fila crecía (etiqueta «Hecha») y la casilla se
+recentraba. Ahora la caja es fija (`18×18`, `padding: 0`, `flex: 0 0 auto`,
+`justify-self: center`, `align-self: start`) y `:checked` solo cambia colores y el tamaño fijo del
+trazo. Además, **la gestión completada ya no cambia de bloque**: se queda en su sitio con
+`.task-row.done`, tachado y la etiqueta «Hecha».
+
+### 6. Mensajes
+
+- `mensajeDeError` ya no devuelve un `\n` literal y traduce los nombres de campo del API
+  (`plazo` → «Fecha límite», `duracion_horas` → «Duración», …). Los repositorios dejaron de
+  volcar el `JSON` crudo de DRF al usuario.
+- Se retiró `input:invalid:not(:placeholder-shown)`: con `!important` pintaba campos en rojo
+  antes de escribir y pisaba el estado real. Ahora la validez la marcan `.error` y
+  `aria-invalid`; los formularios de login, registro y recuperación también llevan `noValidate`.
+- Formato común `<Acción>: «<título>».` para crear, actualizar, eliminar, mover y completar.
+- El toast de error usa `role="alert"` y el de éxito `role="status"`.
+
+### 7. Accesibilidad
+
+Todos los campos de los formularios tocados tienen `id` + `htmlFor`, `aria-invalid` y
+`aria-describedby` apuntando a su error o a su ayuda. Los botones de icono que solo tenían
+`title` llevan también `aria-label`. El diálogo de Mover declara `role="dialog"`,
+`aria-modal` y cierra con `Escape`.
+
+### Verificación
+
+| Comprobación | Resultado |
+| --- | --- |
+| `npm run typecheck` | 0 errores. |
+| `npm run build` | Compila sin advertencias. |
+| `python manage.py test` (backend) | 54 pruebas, OK. |
+| Recorrido visual en navegador | **No automatizado**: este repo no tiene arnés de pruebas de UI ni navegador disponible en el entorno, de modo que la revisión de los escenarios (fechas inválidas, plazo fuera de rango, límite diario, motivo vacío y con texto, desplazamiento de la casilla, responsive) se hizo por revisión estática de estilos y de estados, no pulsando la interfaz. |

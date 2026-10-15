@@ -45,6 +45,34 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/** Nombres de campo del API traducidos a los que usa el organizador. */
+const CAMPOS_API: Record<string, string> = {
+  nombre: "Nombre",
+  tipo: "Tipo",
+  lugar: "Lugar",
+  email: "Correo electrónico",
+  password: "Contraseña",
+  evento: "Evento",
+  gestion: "Gestión",
+  titulo: "Gestión",
+  categoria: "Categoría",
+  prioridad: "Prioridad",
+  estado: "Estado",
+  fecha_inicio: "Fecha de inicio",
+  fecha_final: "Fecha de fin",
+  fecha_limite: "Fecha límite",
+  plazo: "Fecha límite",
+  hora: "Hora",
+  hora_limite: "Hora límite",
+  hora_inicio: "Hora de inicio",
+  duracion_horas: "Duración",
+  estimacion_horas: "Horas estimadas",
+  limite_diario_horas: "Límite diario",
+  notas_produccion: "Notas",
+  motivo_movimiento: "Motivo del cambio",
+  non_field_errors: "Error",
+};
+
 /** Convierte los errores de DRF en un mensaje legible para mostrar al usuario. */
 export function mensajeDeError(data: unknown): string {
   if (!data) return "No se pudo conectar con el servidor.";
@@ -63,16 +91,9 @@ export function mensajeDeError(data: unknown): string {
     }
 
     const partes: string[] = [];
-    const mapaCampos: Record<string, string> = {
-      email: "Correo electrónico",
-      password: "Contraseña",
-      nombre: "Nombre",
-      non_field_errors: "Error",
-    };
-
     for (const [campo, valor] of Object.entries(registro)) {
       const texto = Array.isArray(valor) ? valor.join(" ") : String(valor);
-      const nombreCampo = mapaCampos[campo] || campo;
+      const nombreCampo = CAMPOS_API[campo] || campo;
 
       if (campo === "non_field_errors") {
         partes.push(texto);
@@ -80,7 +101,7 @@ export function mensajeDeError(data: unknown): string {
         partes.push(`• ${nombreCampo}: ${texto}`);
       }
     }
-    if (partes.length) return partes.join("\\n");
+    if (partes.length) return partes.join("\n");
   }
   return "Ocurrió un error inesperado.";
 }
