@@ -1973,15 +1973,17 @@ function CrearEvento() {
   // Al corregir el campo, su mensaje desaparece; al mover el inicio del evento
   // los plazos se recolocan y el aviso de plazo deja de aplicar.
   const actualizarTarea = (id: string, cambios: Partial<BorradorTarea>) => {
-    setTareas((ts) => ts.map((t) => (t.id === id ? { ...t, ...cambios } : t)));
+    const lista = tareas.map((t) => (t.id === id ? { ...t, ...cambios } : t));
+    setTareas(lista);
     setErrorTareas((errs) => ({ ...errs, [id]: { ...errs[id] } }));
-    limpiarAvisosDelPlan();
+    refrescarAvisoTotal(lista);
   };
 
   const quitarTarea = (id: string) => {
-    setTareas((ts) => ts.filter((t) => t.id !== id));
+    const lista = tareas.filter((t) => t.id !== id);
+    setTareas(lista);
     setErrorTareas(({ [id]: _quitada, ...resto }) => resto);
-    limpiarAvisosDelPlan();
+    refrescarAvisoTotal(lista);
   };
 
   /**
@@ -2007,6 +2009,32 @@ function CrearEvento() {
   const maximoEstimacion = (valor: string) =>
     Math.max(timeToHours(datos.duracion), timeToHours(valor));
 
+  /**
+   * El plan completo tampoco puede sumar más horas que la duración del evento:
+   * cubre las plantillas y cualquier combinación escrita a mano.
+   */
+  const avisoTotalDelPlan = (lista: BorradorTarea[]) => {
+    const duracion = timeToHours(datos.duracion);
+    const total = lista.reduce((suma, t) => suma + timeToHours(t.estimacion), 0);
+    if (duracion <= 0 || total <= duracion + 0.001) return "";
+    return `El plan suma ${formatoHoras(total)} h de gestiones y el evento dura ${formatoHoras(
+      duracion,
+    )} h: ajusta alguna estimación o la duración del evento.`;
+  };
+
+  /** Limpia los avisos del plan y deja el del total recalculado con la lista dada. */
+  const refrescarAvisoTotal = (lista: BorradorTarea[]) => {
+    setError((errs) => {
+      const restantes = Object.fromEntries(
+        Object.entries(errs).filter(
+          ([campo]) => !campo.startsWith("plan:") && campo !== "general",
+        ),
+      );
+      const aviso = avisoTotalDelPlan(lista);
+      return aviso ? { ...restantes, general: aviso } : restantes;
+    });
+  };
+
   /** Limpia la tarjeta de nueva gestión y deja el plan como estaba al abrirlo. */
   const limpiarNueva = () => {
     setNuevo(borradorInicial(datos.fechaInicio));
@@ -2023,9 +2051,10 @@ function CrearEvento() {
       return;
     }
     setErrorNuevo({});
-    setTareas((ts) => [...ts, { ...nuevo, id: generarId("draft") }]);
+    const lista = [...tareas, { ...nuevo, id: generarId("draft") }];
+    setTareas(lista);
     setNuevo(borradorInicial(datos.fechaInicio));
-    limpiarAvisosDelPlan();
+    refrescarAvisoTotal(lista);
   };
 
   const aplicarPlanPredefinido = (tipoPlan: string) => {
@@ -2094,7 +2123,8 @@ function CrearEvento() {
     }));
     setTareas(tareasNuevas);
     setErrorTareas({});
-    limpiarAvisosDelPlan();
+    // Si la plantilla no cabe en el evento, avisa de inmediato.
+    refrescarAvisoTotal(tareasNuevas);
   };
 
   const intentarSubmit = async (e: FormEvent) => {
@@ -2156,6 +2186,16 @@ function CrearEvento() {
         validacion.general = `El plan supera tu límite diario de ${formatoHoras(
           limiteDiario,
         )} h en ${detalle}.`;
+      }
+    }
+
+    // El plan completo tampoco puede sumar más que la duración del evento.
+    if (tareasFinales.length) {
+      const avisoTotal = avisoTotalDelPlan(tareasFinales);
+      if (avisoTotal) {
+        validacion.general = validacion.general
+          ? `${validacion.general} ${avisoTotal}`
+          : avisoTotal;
       }
     }
 
@@ -2400,8 +2440,10 @@ function CrearEvento() {
                   Cada gestión se resuelve{" "}
                   <strong>antes o el mismo día</strong> del inicio del evento (
                   {fechaBonita(datos.fechaInicio, true)}). La hora límite se
-                  calcula sola: comienzo + estimación. También puedes crear el
-                  evento sin gestiones.
+                  calcula sola: comienzo + estimación, y el plan completo no
+                  puede sumar más de {formatoHoras(timeToHours(datos.duracion))}{" "}
+                  h (la duración del evento). También puedes crear el evento sin
+                  gestiones.
                 </p>
               </div>
               <div className="plan-head-acciones">
