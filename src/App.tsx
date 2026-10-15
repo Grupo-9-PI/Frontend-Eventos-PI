@@ -39,6 +39,7 @@ import {
 } from "wouter";
 import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
+import { api, mensajeDeError } from "@/services/api";
 import { useAuth } from "./Root";
 import {
   combinarFechaHora,
@@ -84,7 +85,7 @@ type Store = {
     id: string,
     cambios: {
       fechaLimite: string;
-      horaLimite: string;
+      horaInicio: string;
       estimacion: number;
       motivoMovimiento?: string;
     },
@@ -325,7 +326,7 @@ function useDatos(activo: boolean) {
     id: string,
     cambios: {
       fechaLimite: string;
-      horaLimite: string;
+      horaInicio: string;
       estimacion: number;
       motivoMovimiento?: string;
     },
@@ -334,7 +335,7 @@ function useDatos(activo: boolean) {
     if (res.ok) {
       await cargarTodo(false);
       notifySuccess(
-        `Gestión movida al ${fechaHoraBonita(cambios.fechaLimite, cambios.horaLimite)}.`,
+        `Gestión movida al ${fechaHoraBonita(cambios.fechaLimite, cambios.horaInicio || undefined)}.`,
       );
     }
     return res;
@@ -388,6 +389,7 @@ function App() {
             <Route path="/login" component={LoginPage} />
             <Route path="/registro" component={RegisterPage} />
             <Route path="/recuperar" component={RecuperarPasswordPage} />
+            <Route path="/restablecer" component={RestablecerPasswordPage} />
             <Route>
               <ProtectedRoute>
                 <Shell />
@@ -1026,6 +1028,9 @@ function FilaTarea({
   const fecha = estadoFecha(tarea);
   const hecha = tarea.estado === "hecho";
   const motivo = tarea.motivoMovimiento?.trim();
+  const categoria = CATEGORIAS_GESTION.find(
+    (c) => c.valor === tarea.categoria,
+  )?.etiqueta;
   return (
     <div className={"task-row " + fecha + (hecha ? " done" : "")}>
       <input
@@ -1050,6 +1055,7 @@ function FilaTarea({
             {textoPlazo(tarea)}
           </span>
           <span>{hoursToTime(tarea.estimacion)} horas estimadas</span>
+          {categoria && <span className="tag">{categoria}</span>}
           {tarea.horaInicio && <span>Inicio {tarea.horaInicio}</span>}
           {tarea.estado === "en_progreso" && (
             <span className="tag tag-urgent">En curso</span>
@@ -1167,20 +1173,15 @@ function sumarHorasAbiertas(
 // y un solo mensaje de capacidad, reutilizados por todos los formularios.
 // ---------------------------------------------------------------------------
 
-/** Máximo diario que acepta el servidor (ConfiguracionOrganizadorSerializer). */
-const LIMITE_DIARIO_MAXIMO = 24;
-/** Duraciones que ofrece el desplegable, de 30 minutos a un día completo. */
-const DURACIONES = [
-  "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30", "04:00",
-  "04:30", "05:00", "06:00", "07:00", "08:00", "10:00", "12:00", "24:00",
-];
-const DURACION_MINIMA = "00:30";
-
-/** "4 h" / "4,5 h" a partir de un texto HH:MM. */
-function textoDuracion(horas: string): string {
-  const h = timeToHours(horas);
-  return `${formatoHoras(h)} h`;
-}
+/**
+ * Rango del límite diario que acepta el servidor
+ * (ConfiguracionOrganizadorSerializer: 1 a 16 h; cuentas nuevas quedan en 6 h).
+ */
+const LIMITE_DIARIO_MAXIMO = 16;
+/** Cantidad mínima que aceptan los formularios: media hora. */
+const CANTIDAD_MINIMA_HORAS = 0.5;
+/** Salto de minutos que ofrecen los menús de cantidad (HH:MM). */
+const PASO_MINUTOS = 5;
 
 /**
  * Mensaje único de capacidad: «X h planificadas [hoy|de trabajo planificado]
@@ -1224,9 +1225,47 @@ function IndicadorHoras({
   );
 }
 
+/** Horas del menú de cantidad: de 00 al tope (nunca pierde el valor actual). */
+function opcionesDeHoras(maximo: number): string[] {
+  const tope = Math.max(0, Math.ceil(maximo));
+  return Array.from({ length: tope + 1 }, (_, h) => String(h).padStart(2, "0"));
+}
+
+/** Minutos del menú de cantidad, en saltos de `PASO_MINUTOS`. */
+function opcionesDeMinutos(): string[] {
+  const total = Math.floor(60 / PASO_MINUTOS);
+  return Array.from({ length: total }, (_, i) =>
+    String(i * PASO_MINUTOS).padStart(2, "0"),
+  );
+}
+
+/** "HH:MM" sin huecos a partir de un texto libre: "4:5" → ["04", "05"]. */
+function dividirHoras(texto: string): [string, string] {
+  const [hh = "", mm = ""] = (texto || "").split(":");
+  const hora = hh.replace(/\D/g, "").padStart(2, "0").slice(-2);
+  const minuto = mm.replace(/\D/g, "").padStart(2, "0").slice(0, 2);
+  return [hora || "00", minuto || "00"];
+}
+
+/** Añade un valor a las opciones si aún no está, para nunca perder el actual. */
+function incluirOpcion(opciones: string[], valor: string): string[] {
+  return opciones.includes(valor) ? opciones : [...opciones, valor].sort();
+}
+
+/** "30 minutos" / "2 horas" a partir de una cantidad en horas. */
+function textoCantidadHoras(horas: number): string {
+  const minutos = Math.round(horas * 60);
+  if (minutos % 60 === 0) {
+    const h = minutos / 60;
+    return `${h} ${h === 1 ? "hora" : "horas"}`;
+  }
+  return `${minutos} minutos`;
+}
+
 /**
- * Campo de horas estimado. Un único control HH:MM para el plan inicial, para
- * agregar/editar una gestión y para moverla: mismo formato y mismos mensajes.
+ * Campo de cantidad de tiempo (HH:MM) con menús de horas y minutos, iguales al
+ * selector de hora pero sin AM/PM: son horas y minutos acumulados, no una hora
+ * del día. El tope sale del límite diario programado por el organizador.
  */
 function CampoHoras({
   id,
@@ -1236,6 +1275,9 @@ function CampoHoras({
   testId,
   etiqueta = "Horas estimadas",
   requerido = true,
+  maximoHoras,
+  alcance = "diario",
+  sinAyuda = false,
 }: {
   id: string;
   valor: string;
@@ -1244,54 +1286,84 @@ function CampoHoras({
   testId?: string;
   etiqueta?: string;
   requerido?: boolean;
+  maximoHoras: number;
+  /** "evento": el tope es la duración total del evento; "diario": el límite del organizador. */
+  alcance?: "diario" | "evento";
+  sinAyuda?: boolean;
 }) {
   const ayudaId = `${id}-ayuda`;
   const errorId = `${id}-error`;
+  const [hh, mm] = dividirHoras(valor);
+  const horas = incluirOpcion(opcionesDeHoras(maximoHoras), hh);
+  const minutos = incluirOpcion(opcionesDeMinutos(), mm);
+  const descritoPor = error ? errorId : sinAyuda ? undefined : ayudaId;
+  const cambiar = (nuevaHora: string, nuevoMinuto: string) =>
+    onChange(`${nuevaHora}:${nuevoMinuto}`);
   return (
     <div className="field">
-      <label htmlFor={id}>
+      <label htmlFor={`${id}-horas`}>
         {etiqueta} {requerido && <span className="req">*</span>}
       </label>
       {error && <ErrorCampo id={errorId}>{error}</ErrorCampo>}
-      <div className="horas-input">
-        <input
-          id={id}
-          data-testid={testId}
-          type="text"
-          inputMode="numeric"
-          placeholder="00:00"
-          maxLength={5}
-          value={valor}
+      <div
+        className="horas-menu"
+        data-testid={testId}
+        role="group"
+        aria-label={etiqueta}
+      >
+        <select
+          id={`${id}-horas`}
+          aria-label={`${etiqueta}: horas`}
+          value={hh}
           className={error ? "error" : ""}
           aria-invalid={Boolean(error)}
-          aria-describedby={error ? errorId : ayudaId}
-          onChange={(e) => onChange(normalizarHoras(e.target.value))}
-          onBlur={() => {
-            if (valor.includes(":") && !esHorasValidas(valor)) {
-              onChange(hoursToTime(timeToHours(valor)));
-            }
-          }}
-        />
-        <span aria-hidden="true">h</span>
+          aria-describedby={descritoPor}
+          onChange={(e) => cambiar(e.target.value, mm)}
+        >
+          {horas.map((h) => (
+            <option key={h} value={h}>
+              {h}
+            </option>
+          ))}
+        </select>
+        <span className="horas-menu-sep" aria-hidden="true">
+          :
+        </span>
+        <select
+          aria-label={`${etiqueta}: minutos`}
+          value={mm}
+          className={error ? "error" : ""}
+          aria-invalid={Boolean(error)}
+          aria-describedby={descritoPor}
+          onChange={(e) => cambiar(hh, e.target.value)}
+        >
+          {minutos.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <span className="horas-menu-unidad" aria-hidden="true">
+          h
+        </span>
       </div>
-      <small className="field-hint" id={ayudaId}>
-        Horas y minutos, en formato HH:MM. Mínimo 30 minutos.
-      </small>
+      {!sinAyuda && (
+        <small className="field-hint" id={ayudaId}>
+          Horas y minutos (HH:MM). Mínimo{" "}
+          {textoCantidadHoras(CANTIDAD_MINIMA_HORAS)}; máximo{" "}
+          {formatoHoras(Math.max(maximoHoras, CANTIDAD_MINIMA_HORAS))} h
+          {alcance === "evento"
+            ? " (la duración del evento)."
+            : " según tu límite diario."}
+        </small>
+      )}
     </div>
   );
 }
 
-/** Escribe ":" solo y deja el texto en HH:MM sin dejar campos vacíos. */
-function normalizarHoras(texto: string): string {
-  const digitos = texto.replace(/\D/g, "").slice(0, 4);
-  if (digitos.length <= 2) return digitos;
-  return `${digitos.slice(0, 2)}:${digitos.slice(2)}`;
-}
-
 /**
- * Selector de duración del evento. Es un desplegable con opciones válidas, y
- * siempre incluye el valor actual para no perderlo al tocar el resto del
- * formulario.
+ * Duración del evento: la misma cantidad HH:MM que las estimaciones, con el
+ * tope del límite diario programado.
  */
 function CampoDuracion({
   id,
@@ -1308,38 +1380,17 @@ function CampoDuracion({
   limiteDiario: number;
   testId?: string;
 }) {
-  const errorId = `${id}-error`;
-  const ayudaId = `${id}-ayuda`;
-  const opciones = DURACIONES.includes(valor) ? DURACIONES : [valor, ...DURACIONES];
+  const maximo = Math.max(limiteDiario, timeToHours(valor));
   return (
-    <div className="field">
-      <label htmlFor={id}>
-        Duración <span className="req">*</span>
-      </label>
-      {error && <ErrorCampo id={errorId}>{error}</ErrorCampo>}
-      <select
-        id={id}
-        data-testid={testId}
-        value={valor}
-        className={error ? "error" : ""}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? errorId : ayudaId}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {opciones.map((opcion) => (
-          <option key={opcion} value={opcion}>
-            {textoDuracion(opcion)}
-            {opcion === valor && !DURACIONES.includes(valor)
-              ? " (actual)"
-              : ""}
-          </option>
-        ))}
-      </select>
-      <small className="field-hint" id={ayudaId}>
-        Entre 30 minutos y {LIMITE_DIARIO_MAXIMO} h. Tu límite diario de trabajo
-        es {formatoHoras(limiteDiario)} h.
-      </small>
-    </div>
+    <CampoHoras
+      id={id}
+      valor={valor}
+      onChange={onChange}
+      error={error}
+      testId={testId}
+      etiqueta="Duración"
+      maximoHoras={maximo}
+    />
   );
 }
 
@@ -1364,7 +1415,7 @@ function ConfiguracionCapacidadDiaria({
   const guardarLimite = async (event: FormEvent) => {
     event.preventDefault();
     const numero = Number(borrador);
-    // El servidor acepta de 1 a 24 h: el cliente no inventa un tope más bajo.
+    // El servidor acepta de 1 a 16 h: el cliente usa el mismo rango.
     if (!/^\d+$/.test(borrador.trim()) || numero < 1 || numero > LIMITE_DIARIO_MAXIMO) {
       setError(
         `El límite diario debe ser un número entero entre 1 y ${LIMITE_DIARIO_MAXIMO} horas.`,
@@ -1466,7 +1517,7 @@ function ConfiguracionCapacidadDiaria({
 function Opciones() {
   const { eventos } = useStore();
   return (
-    <div>
+    <div className="form-page">
       <Encabezado
         eyebrow="Cuenta"
         titulo="Opciones"
@@ -1793,7 +1844,6 @@ type BorradorTarea = {
   categoria: string;
   prioridad: Prioridad;
   fechaLimite: string;
-  horaLimite: string;
   horaInicio: string;
   estimacion: string;
 };
@@ -1824,19 +1874,19 @@ const borradorInicial = (fechaLimite: string): BorradorTarea => ({
   categoria: "otro",
   prioridad: "media",
   fechaLimite,
-  horaLimite: "18:00",
-  horaInicio: "",
+  horaInicio: "09:00",
   estimacion: "01:00",
 });
 
 /** Comprueba el borrador de una gestión del plan inicial. */
-function validarBorrador(borrador: BorradorTarea): ErrorTarea {
+function validarBorrador(borrador: BorradorTarea, maximoHoras: number): ErrorTarea {
   const e: ErrorTarea = {};
-  if (!borrador.titulo.trim()) e.titulo = "Escribe qué hay que hacer.";
-  if (!esHorasValidas(borrador.estimacion))
-    e.estimacion = "Indica una estimación entre 30 minutos y 24 h (HH:MM).";
+  if (!borrador.titulo.trim()) e.titulo = "Escribe el nombre de la gestión.";
+  if (!esHorasValidas(borrador.estimacion, maximoHoras, CANTIDAD_MINIMA_HORAS)) {
+    e.estimacion = `Indica una estimación entre 30 minutos y ${formatoHoras(maximoHoras)} h.`;
+  }
   if (!borrador.fechaLimite) e.fechaLimite = "Elige la fecha límite.";
-  if (!borrador.horaLimite) e.horaLimite = "Elige la hora límite.";
+  if (!borrador.horaInicio) e.horaInicio = "Elige la hora de comienzo.";
   return e;
 }
 
@@ -1917,10 +1967,42 @@ function CrearEvento() {
     setErrorTareas(({ [id]: _quitada, ...resto }) => resto);
   };
 
+  /**
+   * «Quitar plan» descarta el plan completo: vacía las gestiones del borrador
+   * (para que no viajen al servidor al crear el evento) en lugar de solo
+   * ocultar la sección.
+   */
+  const quitarPlan = () => {
+    setTareas([]);
+    setNuevo(borradorInicial(datos.fechaInicio));
+    setErrorTareas({});
+    setErrorNuevo({});
+    setError((errs) => {
+      const restantes = Object.entries(errs).filter(
+        ([campo]) => !campo.startsWith("plan:") && campo !== "general",
+      );
+      return restantes.length ? Object.fromEntries(restantes) : {};
+    });
+    setMostrarPlan(false);
+  };
+
   const errorDeTarea = (id: string, campo: string) => errorTareas[id]?.[campo] ?? "";
 
+  /**
+   * La estimación de una gestión depende de la duración total del evento (no
+   * del límite diario), sin quedar por debajo del valor ya escrito.
+   */
+  const maximoEstimacion = (valor: string) =>
+    Math.max(timeToHours(datos.duracion), timeToHours(valor));
+
+  /** Limpia la tarjeta de nueva gestión y deja el plan como estaba al abrirlo. */
+  const limpiarNueva = () => {
+    setNuevo(borradorInicial(datos.fechaInicio));
+    setErrorNuevo({});
+  };
+
   const añadirTarea = () => {
-    const errs = validarBorrador(nuevo);
+    const errs = validarBorrador(nuevo, maximoEstimacion(nuevo.estimacion));
     const plazo = validarPlazo(nuevo.fechaLimite, datos.fechaInicio);
     if (plazo) errs.fechaLimite = plazo;
     if (Object.keys(errs).length > 0) {
@@ -1941,8 +2023,7 @@ function CrearEvento() {
           categoria: "otro",
           prioridad: "alta",
           fechaLimite: datos.fechaInicio,
-          horaLimite: "10:00",
-          horaInicio: "",
+          horaInicio: "10:00",
           estimacion: "02:00",
         },
         {
@@ -1950,8 +2031,7 @@ function CrearEvento() {
           categoria: "salon",
           prioridad: "alta",
           fechaLimite: datos.fechaInicio,
-          horaLimite: "12:00",
-          horaInicio: "",
+          horaInicio: "12:00",
           estimacion: "00:30",
         },
       ],
@@ -1961,8 +2041,7 @@ function CrearEvento() {
           categoria: "otro",
           prioridad: "media",
           fechaLimite: datos.fechaInicio,
-          horaLimite: "15:00",
-          horaInicio: "",
+          horaInicio: "15:00",
           estimacion: "01:00",
         },
         {
@@ -1970,8 +2049,7 @@ function CrearEvento() {
           categoria: "catering",
           prioridad: "alta",
           fechaLimite: datos.fechaInicio,
-          horaLimite: "12:00",
-          horaInicio: "",
+          horaInicio: "12:00",
           estimacion: "00:30",
         },
       ],
@@ -1981,8 +2059,7 @@ function CrearEvento() {
           categoria: "otro",
           prioridad: "alta",
           fechaLimite: datos.fechaInicio,
-          horaLimite: "10:00",
-          horaInicio: "",
+          horaInicio: "10:00",
           estimacion: "02:00",
         },
       ],
@@ -1992,8 +2069,7 @@ function CrearEvento() {
           categoria: "otro",
           prioridad: "media",
           fechaLimite: datos.fechaInicio,
-          horaLimite: "09:00",
-          horaInicio: "",
+          horaInicio: "09:00",
           estimacion: "01:00",
         },
       ],
@@ -2010,34 +2086,41 @@ function CrearEvento() {
     e.preventDefault();
     setError({});
 
-    // Si el organizador escribió una gestión sin pulsar «Agregar», se incluye.
-    const pendienteDeAgregar = mostrarPlan && !tareas.length && nuevo.titulo.trim();
-    if (pendienteDeAgregar) {
-      const errs = validarBorrador(nuevo);
+    // La tarjeta de nueva gestión se toma al crear el evento aunque no se haya
+    // pulsado «Agregar al plan»: basta con que tenga nombre.
+    let tareasFinales = tareas;
+    const borradorConNombre = mostrarPlan && nuevo.titulo.trim().length > 0;
+    if (borradorConNombre) {
+      const errs = validarBorrador(nuevo, maximoEstimacion(nuevo.estimacion));
       const plazo = validarPlazo(nuevo.fechaLimite, datos.fechaInicio);
       if (plazo) errs.fechaLimite = plazo;
       if (Object.keys(errs).length > 0) {
+        // Alerta: a la nueva gestión le falta algún dato requerido.
         setErrorNuevo(errs);
-      } else {
-        setTareas((ts) => [...ts, { ...nuevo, id: generarId("draft") }]);
-        setNuevo(borradorInicial(datos.fechaInicio));
-        setErrorNuevo({});
+        setError(validarDatosEvento(datos, limiteDiario));
+        return;
       }
+      tareasFinales = [...tareas, { ...nuevo, id: generarId("draft") }];
+      setTareas(tareasFinales);
+      setNuevo(borradorInicial(datos.fechaInicio));
+      setErrorNuevo({});
     }
 
-    const validacion = validarDatosEvento(datos, mostrarPlan);
+    // Se puede crear el evento sin gestiones: nada obliga a usar «Quitar plan».
+    const validacion = validarDatosEvento(datos, limiteDiario);
     // Los plazos del plan se validan contra la fecha de inicio del evento.
     if (mostrarPlan) {
-      tareas.forEach((t) => {
+      tareasFinales.forEach((t) => {
         const problema = validarPlazo(t.fechaLimite, datos.fechaInicio);
         if (problema) {
-          validacion[`plan:${t.id}`] = `Gestión ${tareas.indexOf(t) + 1}: ${problema}`;
+          validacion[`plan:${t.id}`] =
+            `Gestión ${tareasFinales.indexOf(t) + 1}: ${problema}`;
         }
       });
     }
 
-    if (mostrarPlan && tareas.length) {
-      const porFecha = tareas.reduce<Record<string, number>>((acum, tarea) => {
+    if (mostrarPlan && tareasFinales.length) {
+      const porFecha = tareasFinales.reduce<Record<string, number>>((acum, tarea) => {
         acum[tarea.fechaLimite] =
           (acum[tarea.fechaLimite] ?? 0) + timeToHours(tarea.estimacion);
         return acum;
@@ -2089,7 +2172,8 @@ function CrearEvento() {
       prioridad: t.prioridad,
       estado: "pendiente" as EstadoSubtarea,
       fechaLimite: t.fechaLimite,
-      horaLimite: t.horaLimite,
+      // La hora límite la calcula el servidor (comienzo + estimación).
+      horaLimite: "",
       horaInicio: t.horaInicio || undefined,
       estimacion: timeToHours(t.estimacion),
       motivoMovimiento: "",
@@ -2101,7 +2185,7 @@ function CrearEvento() {
   };
 
   return (
-    <div>
+    <div className="form-page">
       <Encabezado eyebrow="Nuevo plan" titulo="Crear evento" />
       <form onSubmit={intentarSubmit} className="card form-card" noValidate>
         <section className="form-section">
@@ -2300,14 +2384,18 @@ function CrearEvento() {
                 <p className="form-section-note">
                   Cada gestión se resuelve{" "}
                   <strong>antes o el mismo día</strong> del inicio del evento (
-                  {fechaBonita(datos.fechaInicio, true)}).
+                  {fechaBonita(datos.fechaInicio, true)}). La hora límite se
+                  calcula sola: comienzo + estimación. También puedes crear el
+                  evento sin gestiones.
                 </p>
               </div>
               <div className="plan-head-acciones">
                 <button
                   type="button"
                   className="button button-ghost button-small"
-                  onClick={() => setMostrarPlan(false)}
+                  onClick={quitarPlan}
+                  title="Descarta todas las gestiones del plan inicial"
+                  data-testid="quitar-plan"
                 >
                   Quitar plan
                 </button>
@@ -2337,7 +2425,11 @@ function CrearEvento() {
                 {tareas.map((t, index) => (
                   <li className="plan-card" key={t.id}>
                     <div className="plan-card-head">
-                      <span className="plan-card-num">Gestión {index + 1}</span>
+                      <span className="plan-card-num">
+                        Gestión {index + 1} ·{" "}
+                        {CATEGORIAS_GESTION.find((c) => c.valor === t.categoria)
+                          ?.etiqueta ?? "Otro"}
+                      </span>
                       <button
                         type="button"
                         className="button button-small button-ghost button-icon"
@@ -2351,7 +2443,7 @@ function CrearEvento() {
                     </div>
                     <div className="field">
                       <label htmlFor={`plan-${t.id}-titulo`}>
-                        Qué hay que hacer <span className="req">*</span>
+                        Nombre <span className="req">*</span>
                       </label>
                       {errorDeTarea(t.id, "titulo") && (
                         <ErrorCampo id={`plan-${t.id}-titulo-error`}>
@@ -2378,6 +2470,8 @@ function CrearEvento() {
                         id={`plan-${t.id}-estimacion`}
                         valor={t.estimacion}
                         error={errorDeTarea(t.id, "estimacion")}
+                        maximoHoras={maximoEstimacion(t.estimacion)}
+                        alcance="evento"
                         onChange={(valor) =>
                           actualizarTarea(t.id, { estimacion: valor })
                         }
@@ -2430,26 +2524,26 @@ function CrearEvento() {
                       </div>
                       <div className="field">
                         <label htmlFor={`plan-${t.id}-hora`}>
-                          Hora límite <span className="req">*</span>
+                          Hora de comienzo <span className="req">*</span>
                         </label>
-                        {errorDeTarea(t.id, "horaLimite") && (
+                        {errorDeTarea(t.id, "horaInicio") && (
                           <ErrorCampo id={`plan-${t.id}-hora-error`}>
-                            {errorDeTarea(t.id, "horaLimite")}
+                            {errorDeTarea(t.id, "horaInicio")}
                           </ErrorCampo>
                         )}
                         <input
                           id={`plan-${t.id}-hora`}
                           type="time"
-                          value={t.horaLimite}
-                          className={errorDeTarea(t.id, "horaLimite") ? "error" : ""}
-                          aria-invalid={Boolean(errorDeTarea(t.id, "horaLimite"))}
+                          value={t.horaInicio}
+                          className={errorDeTarea(t.id, "horaInicio") ? "error" : ""}
+                          aria-invalid={Boolean(errorDeTarea(t.id, "horaInicio"))}
                           aria-describedby={
-                            errorDeTarea(t.id, "horaLimite")
+                            errorDeTarea(t.id, "horaInicio")
                               ? `plan-${t.id}-hora-error`
                               : undefined
                           }
                           onChange={(e) =>
-                            actualizarTarea(t.id, { horaLimite: e.target.value })
+                            actualizarTarea(t.id, { horaInicio: e.target.value })
                           }
                         />
                       </div>
@@ -2470,10 +2564,20 @@ function CrearEvento() {
                   Nueva gestión
                   {tareas.length > 0 && ` ${tareas.length + 1}`}
                 </span>
+                <button
+                  type="button"
+                  className="button button-small button-ghost button-icon"
+                  onClick={limpiarNueva}
+                  title="Limpiar la nueva gestión"
+                  aria-label="Limpiar la nueva gestión"
+                  data-testid="limpiar-nueva-gestion"
+                >
+                  <Trash2 size={13} />
+                </button>
               </div>
               <div className="field">
                 <label htmlFor="plan-nuevo-titulo">
-                  Qué hay que hacer <span className="req">*</span>
+                  Nombre <span className="req">*</span>
                 </label>
                 {errorNuevo.titulo && (
                   <ErrorCampo id="plan-nuevo-titulo-error">
@@ -2499,6 +2603,8 @@ function CrearEvento() {
                   id="plan-nuevo-estimacion"
                   valor={nuevo.estimacion}
                   error={errorNuevo.estimacion}
+                  maximoHoras={maximoEstimacion(nuevo.estimacion)}
+                  alcance="evento"
                   onChange={(valor) => {
                     setNuevo({ ...nuevo, estimacion: valor });
                     setErrorNuevo((errs) => ({ ...errs, estimacion: "" }));
@@ -2554,25 +2660,25 @@ function CrearEvento() {
                 </div>
                 <div className="field">
                   <label htmlFor="plan-nuevo-hora">
-                    Hora límite <span className="req">*</span>
+                    Hora de comienzo <span className="req">*</span>
                   </label>
-                  {errorNuevo.horaLimite && (
+                  {errorNuevo.horaInicio && (
                     <ErrorCampo id="plan-nuevo-hora-error">
-                      {errorNuevo.horaLimite}
+                      {errorNuevo.horaInicio}
                     </ErrorCampo>
                   )}
                   <input
                     id="plan-nuevo-hora"
                     type="time"
-                    value={nuevo.horaLimite}
-                    className={errorNuevo.horaLimite ? "error" : ""}
-                    aria-invalid={Boolean(errorNuevo.horaLimite)}
+                    value={nuevo.horaInicio}
+                    className={errorNuevo.horaInicio ? "error" : ""}
+                    aria-invalid={Boolean(errorNuevo.horaInicio)}
                     aria-describedby={
-                      errorNuevo.horaLimite ? "plan-nuevo-hora-error" : undefined
+                      errorNuevo.horaInicio ? "plan-nuevo-hora-error" : undefined
                     }
                     onChange={(e) => {
-                      setNuevo({ ...nuevo, horaLimite: e.target.value });
-                      setErrorNuevo((errs) => ({ ...errs, horaLimite: "" }));
+                      setNuevo({ ...nuevo, horaInicio: e.target.value });
+                      setErrorNuevo((errs) => ({ ...errs, horaInicio: "" }));
                     }}
                   />
                 </div>
@@ -2625,7 +2731,11 @@ function CrearEvento() {
 }
 
 /** Reglas del formulario general de evento, compartidas por crear y editar. */
-function validarDatosEvento(datos: FormEvento, mostrarPlan: boolean) {
+function validarDatosEvento(
+  datos: FormEvento,
+  limiteDiario: number,
+  duracionOriginal = 0,
+) {
   const e: Record<string, string> = {};
   if (!datos.nombre.trim()) e.nombre = "Escribe el nombre del evento.";
   if (!datos.lugar.trim()) e.lugar = "Indica dónde se hará el evento.";
@@ -2635,29 +2745,35 @@ function validarDatosEvento(datos: FormEvento, mostrarPlan: boolean) {
     e.fechaFin = "La fecha de fin no puede ser anterior a la de inicio.";
   }
   if (!datos.horaEvento) e.horaEvento = "Indica la hora de inicio del evento.";
-  if (!esHorasValidas(datos.duracion)) {
-    e.duracion = `Elige una duración entre ${textoDuracion(DURACION_MINIMA)} y ${
-      LIMITE_DIARIO_MAXIMO
-    } h.`;
+  // La duración del evento se alinea con el límite diario programado.
+  const maximoDuracion = Math.max(limiteDiario, duracionOriginal);
+  if (!esHorasValidas(datos.duracion, maximoDuracion, CANTIDAD_MINIMA_HORAS)) {
+    e.duracion = `Elige una duración entre 30 minutos y ${formatoHoras(maximoDuracion)} h.`;
   }
   if (!datos.tipo.trim()) e.tipo = "Elige o escribe el tipo de evento.";
-  if (mostrarPlan) {
-    e.general =
-      "Agrega al menos una gestión al plan o quita el plan para crear solo el evento.";
-  }
   return e;
 }
 
 /** Reglas de una gestión, con el plazo acotado por el inicio del evento. */
-function validarTarea(candidata: Subtarea, fechaInicio?: string) {
+function validarTarea(
+  candidata: Subtarea,
+  fechaInicio?: string,
+  maximoHoras: number = LIMITE_DIARIO_MAXIMO,
+) {
   const e: Record<string, string> = {};
-  if (!candidata.titulo.trim()) e.titulo = "Escribe qué hay que hacer.";
+  if (!candidata.titulo.trim()) e.titulo = "Escribe el nombre de la gestión.";
   if (!candidata.fechaLimite) e.fechaLimite = "Elige la fecha límite.";
   const plazo = validarPlazo(candidata.fechaLimite, fechaInicio ?? "");
   if (plazo) e.fechaLimite = plazo;
-  if (!candidata.horaLimite) e.horaLimite = "Elige la hora límite.";
-  if (!esHorasValidas(hoursToTime(candidata.estimacion))) {
-    e.estimacion = "Indica una estimación entre 30 minutos y 24 h (HH:MM).";
+  if (!candidata.horaInicio) e.horaInicio = "Elige la hora de comienzo.";
+  if (
+    !esHorasValidas(
+      hoursToTime(candidata.estimacion),
+      maximoHoras,
+      CANTIDAD_MINIMA_HORAS,
+    )
+  ) {
+    e.estimacion = `Indica una estimación entre 30 minutos y ${formatoHoras(maximoHoras)} h.`;
   }
   return e;
 }
@@ -2886,7 +3002,11 @@ function DetalleEvento() {
                 evento={evento}
                 onCancel={() => setMostrarAgregar(false)}
                 onSave={async (t) => {
-                  const e = validarTarea(t as Subtarea, evento.fechaInicio);
+                  const e = validarTarea(
+                    t as Subtarea,
+                    evento.fechaInicio,
+                    evento.duracion,
+                  );
                   if (Object.keys(e).length > 0) return false;
                   const problema = validarCapacidadesTarea(
                     eventos,
@@ -2947,8 +3067,8 @@ function TaskEditor({
           prioridad: "media" as Prioridad,
           estado: "pendiente" as EstadoSubtarea,
           fechaLimite: evento.fechaInicio,
-          horaLimite: "18:00",
-          horaInicio: "",
+          horaInicio: "09:00",
+          horaLimite: "",
           estimacion: "01:00",
         },
   );
@@ -2962,6 +3082,7 @@ function TaskEditor({
     const errs = validarTarea(
       { ...tarea, estimacion: horas } as unknown as Subtarea,
       evento.fechaInicio,
+      Math.max(evento.duracion, tareaInicial?.estimacion ?? 0),
     );
     if (Object.keys(errs).length > 0) {
       setError(errs);
@@ -2978,7 +3099,7 @@ function TaskEditor({
       <div className="task-editor-grid">
         <div className="field full">
           <label htmlFor="gestion-titulo">
-            Qué hay que hacer <span className="req">*</span>
+            Nombre <span className="req">*</span>
           </label>
           {error.titulo && (
             <ErrorCampo id="gestion-titulo-error">{error.titulo}</ErrorCampo>
@@ -3022,19 +3143,19 @@ function TaskEditor({
         </div>
         <div className="field">
           <label htmlFor="gestion-hora">
-            Hora límite <span className="req">*</span>
+            Hora de comienzo <span className="req">*</span>
           </label>
-          {error.horaLimite && (
-            <ErrorCampo id="gestion-hora-error">{error.horaLimite}</ErrorCampo>
+          {error.horaInicio && (
+            <ErrorCampo id="gestion-hora-error">{error.horaInicio}</ErrorCampo>
           )}
           <input
             id="gestion-hora"
             type="time"
-            className={error.horaLimite ? "error" : ""}
-            value={tarea.horaLimite}
-            aria-invalid={Boolean(error.horaLimite)}
-            aria-describedby={error.horaLimite ? "gestion-hora-error" : undefined}
-            onChange={(e) => setTarea({ ...tarea, horaLimite: e.target.value })}
+            className={error.horaInicio ? "error" : ""}
+            value={tarea.horaInicio}
+            aria-invalid={Boolean(error.horaInicio)}
+            aria-describedby={error.horaInicio ? "gestion-hora-error" : undefined}
+            onChange={(e) => setTarea({ ...tarea, horaInicio: e.target.value })}
           />
         </div>
         <CampoHoras
@@ -3042,6 +3163,11 @@ function TaskEditor({
           testId="task-estimacion"
           valor={tarea.estimacion as string}
           error={error.estimacion}
+          maximoHoras={Math.max(
+            evento.duracion,
+            timeToHours(tarea.estimacion as string),
+          )}
+          alcance="evento"
           onChange={(valor) => setTarea({ ...tarea, estimacion: valor })}
         />
         <div className="field">
@@ -3252,7 +3378,11 @@ function EventoEditorDialog({
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError({});
-    const validacion = validarDatosEvento(datos, false);
+    const validacion = validarDatosEvento(
+      datos,
+      limiteDiario,
+      evento.duracion,
+    );
     if (Object.keys(validacion).length > 0) {
       setError(validacion);
       return;
@@ -3472,9 +3602,10 @@ function ReprogramarDialog({
   evento?: Evento;
   onClose: () => void;
 }) {
-  const { reprogramarSubtarea, resolverConflictoSubtarea } = useStore();
+  const { reprogramarSubtarea, resolverConflictoSubtarea, limiteDiario } =
+    useStore();
   const [fecha, setFecha] = useState(tarea.fechaLimite);
-  const [hora, setHora] = useState(tarea.horaLimite);
+  const [horaInicio, setHoraInicio] = useState(tarea.horaInicio ?? "");
   const [estimacion, setEstimacion] = useState(hoursToTime(tarea.estimacion));
   const [motivo, setMotivo] = useState(tarea.motivoMovimiento ?? "");
   const [error, setError] = useState("");
@@ -3487,11 +3618,20 @@ function ReprogramarDialog({
   );
   const conflictoRef = useRef<HTMLDivElement>(null);
   const estimacionNumerica = timeToHours(estimacion);
+  /**
+   * El tope es la duración total del evento (el límite diario solo si no hay
+   * evento a la vista); nunca por debajo de la estimación original.
+   */
+  const maximoEstimacion = Math.max(
+    evento?.duracion ?? limiteDiario,
+    tarea.estimacion,
+  );
 
   const intentarGuardar = async (fechaPropuesta: string, horas: number) => {
     const problema = validarTarea(
-      { ...tarea, fechaLimite: fechaPropuesta, horaLimite: hora, estimacion: horas },
+      { ...tarea, fechaLimite: fechaPropuesta, horaInicio, estimacion: horas },
       evento?.fechaInicio,
+      maximoEstimacion,
     );
     if (Object.keys(problema).length > 0) {
       setErrores(problema);
@@ -3503,7 +3643,7 @@ function ReprogramarDialog({
     setError("");
     const res = await reprogramarSubtarea(tarea.id, {
       fechaLimite: fechaPropuesta,
-      horaLimite: hora,
+      horaInicio,
       estimacion: horas,
       motivoMovimiento: motivo.trim(),
     });
@@ -3523,9 +3663,9 @@ function ReprogramarDialog({
 
   const confirmar = (e: FormEvent) => {
     e.preventDefault();
-    if (!esHorasValidas(estimacion)) {
+    if (!esHorasValidas(estimacion, maximoEstimacion, CANTIDAD_MINIMA_HORAS)) {
       setErrores({
-        estimacion: "Indica una estimación entre 30 minutos y 24 h (HH:MM).",
+        estimacion: `Indica una estimación entre 30 minutos y ${formatoHoras(maximoEstimacion)} h.`,
       });
       return;
     }
@@ -3542,7 +3682,6 @@ function ReprogramarDialog({
     setError("");
     const res = await resolverConflictoSubtarea(tarea.id, "mover_otro_dia", {
       plazo: fechaSugerida,
-      horaLimite: hora,
     });
     setGuardando(false);
     if (!res.ok) {
@@ -3572,8 +3711,10 @@ function ReprogramarDialog({
   };
 
   const aplicarReduccion = async () => {
-    if (!Number.isFinite(estimacionNumerica) || estimacionNumerica <= 0) {
-      setError("La estimación debe ser mayor que 0 horas.");
+    if (!esHorasValidas(estimacion, maximoEstimacion, CANTIDAD_MINIMA_HORAS)) {
+      setError(
+        `La estimación debe estar entre 30 minutos y ${formatoHoras(maximoEstimacion)} h.`,
+      );
       return;
     }
     setGuardando(true);
@@ -3685,28 +3826,33 @@ function ReprogramarDialog({
             </div>
             <div className="field">
               <label htmlFor="reprogramar-hora">
-                Nueva hora límite <span className="req">*</span>
+                Hora de comienzo <span className="req">*</span>
               </label>
-              {errores.horaLimite && (
+              {errores.horaInicio && (
                 <ErrorCampo id="reprogramar-hora-error">
-                  {errores.horaLimite}
+                  {errores.horaInicio}
                 </ErrorCampo>
               )}
               <input
                 id="reprogramar-hora"
                 type="time"
-                value={hora}
-                className={errores.horaLimite ? "error" : ""}
-                aria-invalid={Boolean(errores.horaLimite)}
-                aria-describedby={errores.horaLimite ? "reprogramar-hora-error" : undefined}
-                onChange={(e) => setHora(e.target.value)}
+                value={horaInicio}
+                className={errores.horaInicio ? "error" : ""}
+                aria-invalid={Boolean(errores.horaInicio)}
+                aria-describedby={errores.horaInicio ? "reprogramar-hora-error" : undefined}
+                onChange={(e) => setHoraInicio(e.target.value)}
               />
+              <small className="field-hint">
+                La hora límite se recalcula: comienzo + estimación.
+              </small>
             </div>
             <CampoHoras
               id="reprogramar-estimacion"
               testId="reprogramar-estimacion"
               valor={estimacion}
               error={errores.estimacion}
+              maximoHoras={maximoEstimacion}
+              alcance="evento"
               onChange={(valor) => {
                 setEstimacion(valor);
                 setErrores((x) => ({ ...x, estimacion: "" }));
@@ -3859,31 +4005,30 @@ function ReprogramarDialog({
                       <span>El total se actualiza al cambiar las horas.</span>
                     </div>
                     <div className="capacity-conflict-reduce">
-                      <label htmlFor="reprogramar-estimacion-conflicto">
-                        Nueva estimación
-                      </label>
-                      <input
+                      <CampoHoras
                         id="reprogramar-estimacion-conflicto"
-                        data-testid="reprogramar-estimacion-conflicto"
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={5}
-                        placeholder="00:00"
-                        value={estimacion}
-                        aria-describedby="capacity-conflict-description"
-                        onChange={(e) => {
-                          setEstimacion(normalizarHoras(e.target.value));
+                        testId="reprogramar-estimacion-conflicto"
+                        etiqueta="Nueva estimación"
+                        valor={estimacion}
+                        maximoHoras={maximoEstimacion}
+                        alcance="evento"
+                        sinAyuda
+                        onChange={(valor) => {
+                          setEstimacion(valor);
                           setErrores((x) => ({ ...x, estimacion: "" }));
                         }}
                       />
-                      <span>h</span>
                       <button
                         type="button"
                         className="button button-secondary button-small"
                         onClick={() => void aplicarReduccion()}
                         disabled={
                           guardando ||
-                          !esHorasValidas(estimacion) ||
+                          !esHorasValidas(
+                            estimacion,
+                            maximoEstimacion,
+                            CANTIDAD_MINIMA_HORAS,
+                          ) ||
                           estimacionNumerica === estimacionConflicto
                         }
                         data-testid="apply-reduced-estimation"
@@ -4099,6 +4244,271 @@ function Progreso() {
             })}
           </div>
         </section>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Página del enlace enviado por correo: /restablecer?uid=...&token=...
+ * Valida los datos con el servidor y guarda la nueva contraseña.
+ */
+function RestablecerPasswordPage() {
+  const [, setLocation] = useLocation();
+  // El enlace del correo trae uid y token por query string.
+  const parametros = new URLSearchParams(window.location.search);
+  const uid = parametros.get("uid") ?? "";
+  const token = parametros.get("token") ?? "";
+  const enlaceCompleto = Boolean(uid && token);
+  const [password, setPassword] = useState("");
+  const [confirmar, setConfirmar] = useState("");
+  const [mostrarPassword, setMostrarPassword] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState("");
+  const [listo, setListo] = useState(false);
+
+  const enviar = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!enlaceCompleto) {
+      setError("El enlace no trae los datos de recuperación. Solicita uno nuevo.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("La contraseña debe tener al menos 8 caracteres.");
+      return;
+    }
+    if (password !== confirmar) {
+      setError("Las contraseñas no coinciden.");
+      return;
+    }
+    setError("");
+    setEnviando(true);
+    try {
+      await api.post("/auth/restablecer/", { uid, token, password });
+      setListo(true);
+    } catch (err: any) {
+      setError(
+        err.response?.data
+          ? mensajeDeError(err.response.data)
+          : "No pudimos conectarnos con el servidor. Revisa tu conexión e inténtalo de nuevo.",
+      );
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "100vh",
+        background: "var(--tinta)",
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 400, padding: "40px 20px" }}>
+        <div style={{ textAlign: "center", marginBottom: 30 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              background: "var(--azul)",
+              color: "var(--papel)",
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "0 auto 16px",
+              fontSize: 18,
+              fontWeight: 700,
+              fontFamily: "var(--fuente-titulo)",
+            }}
+          >
+            EO
+          </div>
+          <h1
+            style={{
+              fontSize: 24,
+              fontWeight: 700,
+              color: "var(--papel)",
+              marginBottom: 8,
+              fontFamily: "var(--fuente-titulo)",
+            }}
+          >
+            Nueva contraseña
+          </h1>
+          <p style={{ color: "var(--apagado)", fontSize: 14 }}>
+            Elige la contraseña que usarás desde ahora.
+          </p>
+        </div>
+
+        <div
+          style={{ background: "var(--panel)", padding: 32, borderRadius: 12 }}
+        >
+          {listo ? (
+            <div style={{ textAlign: "center" }}>
+              <p
+                style={{
+                  color: "var(--salvia)",
+                  fontSize: 14,
+                  marginBottom: 20,
+                  background: "rgba(5, 150, 105, 0.1)",
+                  padding: 12,
+                  borderRadius: 8,
+                  border: "1px solid var(--salvia)",
+                }}
+              >
+                Contraseña actualizada. Ya puedes iniciar sesión con la nueva.
+              </p>
+              <button
+                onClick={() => setLocation("/login")}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  background: "var(--azul-claro)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Iniciar sesión
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={enviar} noValidate>
+              <div
+                className="field"
+                style={{ marginBottom: 20, textAlign: "left" }}
+              >
+                <label
+                  style={{
+                    color: "var(--papel)",
+                    display: "block",
+                    marginBottom: 8,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  Nueva contraseña
+                </label>
+                <input
+                  type={mostrarPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError("");
+                  }}
+                  placeholder="Mínimo 8 caracteres"
+                  autoComplete="new-password"
+                />
+              </div>
+              <div
+                className="field"
+                style={{ marginBottom: 16, textAlign: "left" }}
+              >
+                <label
+                  style={{
+                    color: "var(--papel)",
+                    display: "block",
+                    marginBottom: 8,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  Confirmar contraseña
+                </label>
+                <input
+                  type={mostrarPassword ? "text" : "password"}
+                  required
+                  value={confirmar}
+                  onChange={(e) => {
+                    setConfirmar(e.target.value);
+                    setError("");
+                  }}
+                  placeholder="Repite la contraseña"
+                  autoComplete="new-password"
+                />
+              </div>
+              <label className="checkbox-line" style={{ marginBottom: 16 }}>
+                <input
+                  type="checkbox"
+                  checked={mostrarPassword}
+                  onChange={(e) => setMostrarPassword(e.target.checked)}
+                />
+                Mostrar contraseñas
+              </label>
+              {(error || !enlaceCompleto) && (
+                <span
+                  style={{
+                    color: "var(--oxido)",
+                    fontSize: 12,
+                    marginBottom: 12,
+                    display: "block",
+                    textAlign: "left",
+                  }}
+                >
+                  {error ||
+                    "El enlace no trae los datos de recuperación. Solicita uno nuevo."}
+                </span>
+              )}
+              {enlaceCompleto ? (
+                <button
+                  type="submit"
+                  disabled={enviando}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: "var(--azul-claro)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 6,
+                    fontWeight: 600,
+                    cursor: enviando ? "default" : "pointer",
+                    opacity: enviando ? 0.7 : 1,
+                    marginBottom: 16,
+                  }}
+                >
+                  {enviando ? "Guardando…" : "Guardar contraseña"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setLocation("/recuperar")}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: "var(--azul-claro)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 6,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    marginBottom: 16,
+                  }}
+                >
+                  Solicitar un enlace nuevo
+                </button>
+              )}
+              <div style={{ textAlign: "center" }}>
+                <span
+                  onClick={() => setLocation("/login")}
+                  style={{
+                    cursor: "pointer",
+                    fontSize: 14,
+                    color: "var(--azul-claro)",
+                    fontWeight: 500,
+                  }}
+                >
+                  Volver al inicio de sesión
+                </span>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -4647,16 +5057,31 @@ function RecuperarPasswordPage() {
   const [, setLocation] = useLocation();
   const [correo, setCorreo] = useState("");
   const [enviado, setEnviado] = useState(false);
+  const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!correo.includes("@")) {
       setError("Por favor, ingresa un correo electrónico válido.");
       return;
     }
     setError("");
-    setEnviado(true);
+    setEnviando(true);
+    try {
+      await api.post("/auth/recuperar/", {
+        email: correo.trim().toLowerCase(),
+      });
+      setEnviado(true);
+    } catch (err: any) {
+      setError(
+        err.response?.data
+          ? mensajeDeError(err.response.data)
+          : "No pudimos conectarnos con el servidor. Revisa tu conexión e inténtalo de nuevo.",
+      );
+    } finally {
+      setEnviando(false);
+    }
   };
 
   return (
@@ -4714,16 +5139,26 @@ function RecuperarPasswordPage() {
                 style={{
                   color: "var(--salvia)",
                   fontSize: 14,
-                  marginBottom: 20,
+                  marginBottom: 12,
                   background: "rgba(5, 150, 105, 0.1)",
                   padding: 12,
                   borderRadius: 8,
                   border: "1px solid var(--salvia)",
                 }}
               >
-                Anotamos el correo <strong>{correo.trim()}</strong>. La
-                recuperación automática todavía no está disponible: pide al
-                administrador del sistema que restablezca esa contraseña.
+                Anotamos <strong>{correo.trim()}</strong>. Si el correo tiene una
+                cuenta, te enviamos un enlace para restablecer la contraseña:
+                ábrelo para elegir la nueva.
+              </p>
+              <p
+                style={{
+                  color: "var(--apagado)",
+                  fontSize: 12,
+                  marginBottom: 20,
+                }}
+              >
+                ¿No llega en unos minutos? Revisa el spam. En desarrollo, el
+                enlace también se imprime en la consola del servidor.
               </p>
               <button
                 onClick={() => setLocation("/login")}
@@ -4796,6 +5231,7 @@ function RecuperarPasswordPage() {
 
               <button
                 type="submit"
+                disabled={enviando}
                 style={{
                   width: "100%",
                   padding: "12px",
@@ -4804,11 +5240,12 @@ function RecuperarPasswordPage() {
                   border: "none",
                   borderRadius: 6,
                   fontWeight: 600,
-                  cursor: "pointer",
+                  cursor: enviando ? "default" : "pointer",
+                  opacity: enviando ? 0.7 : 1,
                   marginBottom: 16,
                 }}
               >
-                Solicitar restablecimiento
+                {enviando ? "Enviando…" : "Solicitar restablecimiento"}
               </button>
 
               <div style={{ textAlign: "center" }}>

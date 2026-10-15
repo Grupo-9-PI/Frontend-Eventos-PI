@@ -582,6 +582,11 @@ p {
 .form-card {
   max-width: 100%;
 }
+/* Páginas de formulario: columna centrada, sin campos estirados de más. */
+.form-page {
+  max-width: 880px;
+  margin: 0 auto;
+}
 .form-section {
   padding: 21px;
   border-bottom: 1px solid var(--linea);
@@ -606,6 +611,12 @@ p {
 .field {
   display: grid;
   gap: 6px;
+  align-content: start;
+}
+/* Alta pareja de controles: todo el alto del campo se alinea entre columnas. */
+.field select,
+.field input:not([type="checkbox"]) {
+  min-height: 40px;
 }
 .field.full {
   grid-column: 1 / -1;
@@ -1126,7 +1137,8 @@ select option {
 }
 /* Rejilla interna del bloque de fechas/hora/duración del formulario de evento. */
 .form-grid-dates {
-  gap: 15px 17px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
 }
 /* Bloque de una gestión dentro de la vista Hoy. */
 .hoy-section + .hoy-section {
@@ -1230,20 +1242,21 @@ select option {
 }
 .capacity-conflict-reduce {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 9px;
+}
+.capacity-conflict-reduce .field {
+  gap: 4px;
 }
 .capacity-conflict-reduce label {
-  width: 100%;
   color: var(--apagado);
   font-size: 10px;
 }
-.capacity-conflict-reduce input {
-  width: 85px;
-}
-.capacity-conflict-reduce > span {
-  margin-right: 3px;
+.capacity-conflict-reduce .horas-menu select {
+  min-width: 54px;
+  padding: 7px 6px;
+  font-size: 12px;
 }
 .capacity-conflict-actions {
   display: flex;
@@ -1428,8 +1441,6 @@ select option {
 }
 .plan-nueva {
   margin-top: 13px;
-  border-color: var(--azul);
-  background: rgba(44, 102, 147, 0.06);
 }
 .plan-card-head {
   display: flex;
@@ -1454,17 +1465,25 @@ select option {
   justify-content: flex-end;
 }
 
-/* Campo de horas HH:MM con su unidad, compartido por todos los formularios. */
-.horas-input {
+/* Cantidad de tiempo HH:MM: menús de horas y minutos, sin AM/PM (no es una
+   hora del día sino horas y minutos acumulados). */
+.horas-menu {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
-.horas-input input {
-  flex: 1 1 auto;
-  min-width: 0;
+.horas-menu select {
+  width: auto;
+  min-width: 62px;
+  padding: 10px 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
-.horas-input span {
+.horas-menu-sep {
+  color: var(--apagado);
+  font-weight: 600;
+}
+.horas-menu-unidad {
   flex-shrink: 0;
   color: var(--apagado);
   font-size: 12px;

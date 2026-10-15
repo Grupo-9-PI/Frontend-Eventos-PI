@@ -222,8 +222,10 @@ function mapSubtareaToApi(eventoId: string, t: Omit<Subtarea, "id">) {
     estado: t.estado,
     estimacion_horas: t.estimacion,
     plazo: t.fechaLimite,
-    hora_limite: t.horaLimite,
+    // La hora límite la calcula el servidor (comienzo + estimación); solo se
+    // envía si aún no hay hora de comienzo (datos antiguos).
     hora_inicio: t.horaInicio || null,
+    hora_limite: t.horaInicio ? undefined : t.horaLimite || undefined,
     motivo_movimiento: t.motivoMovimiento ?? "",
   };
 }
@@ -313,7 +315,7 @@ export const repositorioEventos = {
     id: string,
     cambios: {
       fechaLimite: string;
-      horaLimite: string;
+      horaInicio: string;
       estimacion: number;
       motivoMovimiento?: string;
     },
@@ -321,7 +323,7 @@ export const repositorioEventos = {
     try {
       const response = await api.patch(`/subtareas/${id}/reprogramar/`, {
         plazo: cambios.fechaLimite,
-        hora_limite: cambios.horaLimite,
+        hora_inicio: cambios.horaInicio || null,
         estimacion_horas: cambios.estimacion,
         motivo_movimiento: cambios.motivoMovimiento ?? "",
       });
@@ -446,11 +448,21 @@ export function hoursToTime(h: number): string {
   return hh.toString().padStart(2, "0") + ":" + mm.toString().padStart(2, "0");
 }
 
-/** ¿El texto tiene forma HH:MM y representa una cantidad de horas válida? */
-export function esHorasValidas(texto: string, maximoHoras = 24): boolean {
+/**
+ * ¿El texto tiene forma HH:MM y representa una cantidad de horas válida?
+ * `minimoHoras` permite exigir un piso (por ejemplo, media hora) sin romper el
+ * caso por defecto, en el que cualquier cantidad mayor a cero vale.
+ */
+export function esHorasValidas(
+  texto: string,
+  maximoHoras = 24,
+  minimoHoras = 0,
+): boolean {
   if (!/^\d{1,2}:\d{2}$/.test(texto.trim())) return false;
   const horas = timeToHours(texto);
-  return Number.isFinite(horas) && horas > 0 && horas <= maximoHoras;
+  if (!Number.isFinite(horas)) return false;
+  if (minimoHoras > 0) return horas >= minimoHoras && horas <= maximoHoras;
+  return horas > 0 && horas <= maximoHoras;
 }
 
 /**
