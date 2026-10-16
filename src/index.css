@@ -1518,18 +1518,6 @@ select option {
   gap: 15px;
 }
 
-/* Etiqueta de evento cancelado. */
-.tag-cancelado {
-  color: var(--ambar);
-  border-color: rgba(232, 163, 61, 0.45);
-  background: rgba(232, 163, 61, 0.1);
-}
-.event-card.cancelado {
-  opacity: 0.72;
-}
-.event-card.cancelado:hover {
-  opacity: 1;
-}
 .detail-subtitulo {
   display: flex;
   align-items: center;

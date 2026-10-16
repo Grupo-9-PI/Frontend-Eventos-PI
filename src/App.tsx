@@ -1,4 +1,4 @@
-﻿import {
+import {
   createContext,
   useContext,
   useEffect,
@@ -9,7 +9,6 @@
 } from "react";
 import {
   ArrowLeft,
-  Ban,
   CalendarDays,
   Check,
   ChevronRight,
@@ -561,8 +560,7 @@ function Shell() {
   const { eventos, hoy, cargando } = useStore();
   const [location, setLocation] = useLocation();
   const retrasadas = hoy?.grupos.vencidas.length ?? 0;
-  // Un evento cancelado deja de generar trabajo, así que no cuenta como activo.
-  const activos = eventos.filter((e) => !e.cancelado && estaActivo(e)).length;
+  const activos = eventos.filter(estaActivo).length;
   const [eventoActivo, setEventoActivo] = useState("");
   const navegarEvento = (id: string) => {
     setEventoActivo(id);
@@ -786,7 +784,7 @@ function Shell() {
           >
             <option value="">Consultar eventos…</option>
             {eventos
-              .filter((e) => !e.cancelado && estaActivo(e))
+              .filter(estaActivo)
               .map((evento) => (
                 <option key={evento.id} value={evento.id}>
                   {evento.nombre}
@@ -931,9 +929,8 @@ function estaActivo(evento: Evento) {
   return (
     evento.estadoAgenda === "activo" ||
     evento.estadoAgenda === "retrasado" ||
-    (!evento.cancelado &&
-      (diferenciaDias(hoyISO(), evento.fechaInicio) >= 0 ||
-        evento.subtareas.some((t) => t.estado !== "hecho")))
+    diferenciaDias(hoyISO(), evento.fechaInicio) >= 0 ||
+    evento.subtareas.some((t) => t.estado !== "hecho")
   );
 }
 
@@ -1682,7 +1679,6 @@ function Hoy() {
 const FILTROS_EVENTO: { valor: string; etiqueta: string; vacio: string }[] = [
   { valor: "activos", etiqueta: "Activos y retrasados", vacio: "No tienes eventos activos ni retrasados." },
   { valor: "pasados", etiqueta: "Pasados", vacio: "No tienes eventos terminados." },
-  { valor: "cancelados", etiqueta: "Cancelados", vacio: "No tienes eventos cancelados." },
   { valor: "todos", etiqueta: "Todos", vacio: "No tienes eventos." },
 ];
 
@@ -1776,19 +1772,11 @@ function TarjetaEvento({ evento }: { evento: Evento }) {
     (t) => t.estado !== "hecho",
   ).length;
   return (
-    <Link
-      href={"/evento/" + evento.id}
-      className={"card event-card" + (evento.cancelado ? " cancelado" : "")}
-    >
+    <Link href={"/evento/" + evento.id} className="card event-card">
       <div className="event-card-top">
         <div>
           <h2 className="event-name">{evento.nombre}</h2>
-          {evento.cancelado && (
-            <span className="tag tag-cancelado">
-              <Ban size={10} aria-hidden="true" /> Cancelado
-            </span>
-          )}
-          {evento.estadoAgenda === "retrasado" && !evento.cancelado && (
+          {evento.estadoAgenda === "retrasado" && (
             <span className="tag tag-overdue">Retrasado</span>
           )}
         </div>
@@ -1891,13 +1879,23 @@ function validarBorrador(borrador: BorradorTarea, maximoHoras: number): ErrorTar
 }
 
 /**
- * El plazo de una gestión no puede pasar del inicio del evento: es la misma
+ * El plazo de una gestión vive dentro de las fechas del evento: es la misma
  * regla que aplica el servidor al crear o editar una gestión.
  */
-function validarPlazo(fechaLimite: string, fechaInicio: string): string {
-  if (fechaLimite && fechaInicio && fechaLimite > fechaInicio) {
-    return `No puede ser posterior al inicio del evento (${fechaBonita(
+function validarPlazo(
+  fechaLimite: string,
+  fechaInicio: string,
+  fechaFin = "",
+): string {
+  if (fechaLimite && fechaInicio && fechaLimite < fechaInicio) {
+    return `No puede ser anterior al inicio del evento (${fechaBonita(
       fechaInicio,
+      true,
+    )}).`;
+  }
+  if (fechaLimite && fechaFin && fechaLimite > fechaFin) {
+    return `No puede ser posterior al fin del evento (${fechaBonita(
+      fechaFin,
       true,
     )}).`;
   }
@@ -1938,7 +1936,9 @@ function CrearEvento() {
     const reubicar = (fecha: string) => {
       if (!fecha) return datos.fechaInicio;
       const nueva = sumarDias(fecha, delta);
-      return nueva > datos.fechaInicio ? datos.fechaInicio : nueva;
+      if (nueva < datos.fechaInicio) return datos.fechaInicio;
+      if (datos.fechaFin && nueva > datos.fechaFin) return datos.fechaFin;
+      return nueva;
     };
     setTareas((actuales) =>
       actuales.map((t) => ({ ...t, fechaLimite: reubicar(t.fechaLimite) })),
@@ -1952,6 +1952,23 @@ function CrearEvento() {
       return restantes.length ? Object.fromEntries(restantes) : {};
     });
   }, [datos.fechaInicio]);
+
+  // Si cambia el fin del evento, las fechas del plan no quedan por fuera.
+  useEffect(() => {
+    if (!datos.fechaFin) return;
+    const fijar = (fecha: string) =>
+      fecha && fecha > datos.fechaFin ? datos.fechaFin : fecha;
+    setTareas((actuales) =>
+      actuales.map((t) => ({ ...t, fechaLimite: fijar(t.fechaLimite) })),
+    );
+    setNuevo((n) => ({ ...n, fechaLimite: fijar(n.fechaLimite) }));
+    setError((errs) => {
+      const restantes = Object.entries(errs).filter(
+        ([campo]) => !campo.startsWith("plan:") && campo !== "general",
+      );
+      return restantes.length ? Object.fromEntries(restantes) : {};
+    });
+  }, [datos.fechaFin]);
 
   const setCampo = (campo: keyof FormEvento, valor: string) => {
     setDatos((d) => ({ ...d, [campo]: valor }));
@@ -2044,7 +2061,7 @@ function CrearEvento() {
 
   const añadirTarea = () => {
     const errs = validarBorrador(nuevo, maximoEstimacion(nuevo.estimacion));
-    const plazo = validarPlazo(nuevo.fechaLimite, datos.fechaInicio);
+    const plazo = validarPlazo(nuevo.fechaLimite, datos.fechaInicio, datos.fechaFin);
     if (plazo) errs.fechaLimite = plazo;
     if (Object.keys(errs).length > 0) {
       setErrorNuevo(errs);
@@ -2137,7 +2154,7 @@ function CrearEvento() {
     const borradorConNombre = mostrarPlan && nuevo.titulo.trim().length > 0;
     if (borradorConNombre) {
       const errs = validarBorrador(nuevo, maximoEstimacion(nuevo.estimacion));
-      const plazo = validarPlazo(nuevo.fechaLimite, datos.fechaInicio);
+      const plazo = validarPlazo(nuevo.fechaLimite, datos.fechaInicio, datos.fechaFin);
       if (plazo) errs.fechaLimite = plazo;
       if (Object.keys(errs).length > 0) {
         // Alerta: a la nueva gestión le falta algún dato requerido.
@@ -2153,10 +2170,29 @@ function CrearEvento() {
 
     // Se puede crear el evento sin gestiones: nada obliga a usar «Quitar plan».
     const validacion = validarDatosEvento(datos, limiteDiario);
+
+    // La fecha de inicio del evento no puede quedar antes de hoy; si es hoy,
+    // la hora de inicio todavía debe estar por llegar.
+    if (datos.fechaInicio && datos.fechaInicio < hoyISO()) {
+      validacion.fechaInicio = "La fecha de inicio no puede ser anterior a hoy.";
+    } else if (datos.fechaInicio === hoyISO() && datos.horaEvento) {
+      const ahora = new Date();
+      const hhmm = `${String(ahora.getHours()).padStart(2, "0")}:${String(
+        ahora.getMinutes(),
+      ).padStart(2, "0")}`;
+      if (datos.horaEvento < hhmm) {
+        validacion.horaEvento =
+          "El evento ya empezó hoy a esa hora: elige una hora más tarde o una fecha posterior.";
+      }
+    }
     // Los plazos del plan se validan contra la fecha de inicio del evento.
     if (mostrarPlan) {
       tareasFinales.forEach((t) => {
-        const problema = validarPlazo(t.fechaLimite, datos.fechaInicio);
+        const problema = validarPlazo(
+          t.fechaLimite,
+          datos.fechaInicio,
+          datos.fechaFin,
+        );
         if (problema) {
           validacion[`plan:${t.id}`] =
             `Gestión ${tareasFinales.indexOf(t) + 1}: ${problema}`;
@@ -2334,6 +2370,7 @@ function CrearEvento() {
                   <input
                     id="evento-inicio"
                     type="date"
+                    min={hoyISO()}
                     className={error.fechaInicio ? "error" : ""}
                     value={datos.fechaInicio}
                     aria-invalid={Boolean(error.fechaInicio)}
@@ -2437,13 +2474,13 @@ function CrearEvento() {
                   </span>
                 </h2>
                 <p className="form-section-note">
-                  Cada gestión se resuelve{" "}
-                  <strong>antes o el mismo día</strong> del inicio del evento (
-                  {fechaBonita(datos.fechaInicio, true)}). La hora límite se
-                  calcula sola: comienzo + estimación, y el plan completo no
-                  puede sumar más de {formatoHoras(timeToHours(datos.duracion))}{" "}
-                  h (la duración del evento). También puedes crear el evento sin
-                  gestiones.
+                  Las fechas de las gestiones van{" "}
+                  <strong>dentro del evento</strong>: del{" "}
+                  {fechaBonita(datos.fechaInicio, true)} al{" "}
+                  {fechaBonita(datos.fechaFin, true)}. La hora límite se calcula
+                  sola (comienzo + estimación) y el plan no puede sumar más de{" "}
+                  {formatoHoras(timeToHours(datos.duracion))} h. También puedes
+                  crear el evento sin gestiones.
                 </p>
               </div>
               <div className="plan-head-acciones">
@@ -2482,11 +2519,7 @@ function CrearEvento() {
                 {tareas.map((t, index) => (
                   <li className="plan-card" key={t.id}>
                     <div className="plan-card-head">
-                      <span className="plan-card-num">
-                        Gestión {index + 1} ·{" "}
-                        {CATEGORIAS_GESTION.find((c) => c.valor === t.categoria)
-                          ?.etiqueta ?? "Otro"}
-                      </span>
+                      <span className="plan-card-num">Gestión {index + 1}</span>
                       <button
                         type="button"
                         className="button button-small button-ghost button-icon"
@@ -2534,22 +2567,6 @@ function CrearEvento() {
                         }
                       />
                       <div className="field">
-                        <label htmlFor={`plan-${t.id}-categoria`}>Categoría</label>
-                        <select
-                          id={`plan-${t.id}-categoria`}
-                          value={t.categoria}
-                          onChange={(e) =>
-                            actualizarTarea(t.id, { categoria: e.target.value })
-                          }
-                        >
-                          {CATEGORIAS_GESTION.map((c) => (
-                            <option key={c.valor} value={c.valor}>
-                              {c.etiqueta}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field">
                         <label htmlFor={`plan-${t.id}-fecha`}>
                           Fecha límite <span className="req">*</span>
                         </label>
@@ -2561,7 +2578,8 @@ function CrearEvento() {
                         <input
                           id={`plan-${t.id}-fecha`}
                           type="date"
-                          max={datos.fechaInicio || undefined}
+                          min={datos.fechaInicio || undefined}
+                          max={datos.fechaFin || undefined}
                           data-testid="initial-plan-deadline"
                           value={t.fechaLimite}
                           className={errorDeTarea(t.id, "fechaLimite") ? "error" : ""}
@@ -2576,7 +2594,8 @@ function CrearEvento() {
                           }
                         />
                         <small className="field-hint" id={`plan-${t.id}-fecha-ayuda`}>
-                          Máximo {fechaBonita(datos.fechaInicio, true)}.
+                          Entre {fechaBonita(datos.fechaInicio, true)} y{" "}
+                          {fechaBonita(datos.fechaFin, true)}.
                         </small>
                       </div>
                       <div className="field">
@@ -2670,22 +2689,6 @@ function CrearEvento() {
                   }}
                 />
                 <div className="field">
-                  <label htmlFor="plan-nuevo-categoria">Categoría</label>
-                  <select
-                    id="plan-nuevo-categoria"
-                    value={nuevo.categoria}
-                    onChange={(e) =>
-                      setNuevo({ ...nuevo, categoria: e.target.value })
-                    }
-                  >
-                    {CATEGORIAS_GESTION.map((c) => (
-                      <option key={c.valor} value={c.valor}>
-                        {c.etiqueta}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field">
                   <label htmlFor="plan-nuevo-fecha">
                     Fecha límite <span className="req">*</span>
                   </label>
@@ -2697,7 +2700,8 @@ function CrearEvento() {
                   <input
                     id="plan-nuevo-fecha"
                     type="date"
-                    max={datos.fechaInicio || undefined}
+                    min={datos.fechaInicio || undefined}
+                    max={datos.fechaFin || undefined}
                     data-testid="plan-nuevo-deadline"
                     value={nuevo.fechaLimite}
                     className={errorNuevo.fechaLimite ? "error" : ""}
@@ -2714,8 +2718,8 @@ function CrearEvento() {
                     }}
                   />
                   <small className="field-hint" id="plan-nuevo-fecha-ayuda">
-                    Máximo {fechaBonita(datos.fechaInicio, true)}. La gestión debe
-                    estar resuelta antes de esa fecha.
+                    Entre {fechaBonita(datos.fechaInicio, true)} y{" "}
+                    {fechaBonita(datos.fechaFin, true)}: fechas del evento.
                   </small>
                 </div>
                 <div className="field">
@@ -2815,16 +2819,17 @@ function validarDatosEvento(
   return e;
 }
 
-/** Reglas de una gestión, con el plazo acotado por el inicio del evento. */
+/** Reglas de una gestión, con el plazo acotado a las fechas del evento. */
 function validarTarea(
   candidata: Subtarea,
   fechaInicio?: string,
   maximoHoras: number = LIMITE_DIARIO_MAXIMO,
+  fechaFin?: string,
 ) {
   const e: Record<string, string> = {};
   if (!candidata.titulo.trim()) e.titulo = "Escribe el nombre de la gestión.";
   if (!candidata.fechaLimite) e.fechaLimite = "Elige la fecha límite.";
-  const plazo = validarPlazo(candidata.fechaLimite, fechaInicio ?? "");
+  const plazo = validarPlazo(candidata.fechaLimite, fechaInicio ?? "", fechaFin ?? "");
   if (plazo) e.fechaLimite = plazo;
   if (!candidata.horaInicio) e.horaInicio = "Elige la hora de comienzo.";
   if (
@@ -2856,7 +2861,6 @@ function DetalleEvento() {
   const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null);
   const [mover, setMover] = useState<Subtarea | null>(null);
   const [editarEvento, setEditarEvento] = useState(false);
-  const [guardandoEvento, setGuardandoEvento] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState<{
     tipo: "evento" | "tarea";
     id: string;
@@ -2902,23 +2906,6 @@ function DetalleEvento() {
     }
   };
 
-  const alternarCancelacion = async () => {
-    setGuardandoEvento(true);
-    await actualizarEvento(evento.id, {
-      nombre: evento.nombre,
-      tipo: evento.tipo,
-      fechaInicio: evento.fechaInicio,
-      fechaFin: evento.fechaFin,
-      horaEvento: evento.horaEvento,
-      duracion: evento.duracion,
-      lugar: evento.lugar,
-      notas: evento.notas,
-      capacidadDiaria: evento.capacidadDiaria,
-      cancelado: !evento.cancelado,
-    });
-    setGuardandoEvento(false);
-  };
-
   // La lista no se reordena al completar: la fila conserva su sitio y solo
   // cambia su estado visual, para que la casilla no salte de posición.
   const gestionadas = evento.subtareas;
@@ -2934,21 +2921,15 @@ function DetalleEvento() {
         <div>
           <h1 className="detail-title">{evento.nombre}</h1>
           <div className="detail-subtitulo">
-            {evento.cancelado ? (
-              <span className="tag tag-cancelado">
-                <Ban size={10} aria-hidden="true" /> Evento cancelado
-              </span>
-            ) : (
-              <span className="detail-meta">
-                {abiertas.length}{" "}
-                {abiertas.length === 1
-                  ? "gestión abierta"
-                  : "gestiones abiertas"}
-                {completadas.length > 0 && ` · ${completadas.length} hecha${
-                  completadas.length === 1 ? "" : "s"
-                }`}
-              </span>
-            )}
+            <span className="detail-meta">
+              {abiertas.length}{" "}
+              {abiertas.length === 1
+                ? "gestión abierta"
+                : "gestiones abiertas"}
+              {completadas.length > 0 && ` · ${completadas.length} hecha${
+                completadas.length === 1 ? "" : "s"
+              }`}
+            </span>
           </div>
         </div>
         <div className="detail-score">
@@ -2983,22 +2964,6 @@ function DetalleEvento() {
           onClick={() => setEditarEvento(true)}
         >
           <Pencil size={14} /> Editar evento
-        </button>
-        <button
-          className="button button-secondary"
-          onClick={alternarCancelacion}
-          disabled={guardandoEvento}
-          data-testid="alternar-cancelacion"
-        >
-          {evento.cancelado ? (
-            <>
-              <RotateCcw size={14} /> Reactivar evento
-            </>
-          ) : (
-            <>
-              <Ban size={14} /> Cancelar evento
-            </>
-          )}
         </button>
         <button className="button button-danger" onClick={eliminarEv}>
           <Trash2 size={14} /> Eliminar evento
@@ -3067,6 +3032,7 @@ function DetalleEvento() {
                     t as Subtarea,
                     evento.fechaInicio,
                     evento.duracion,
+                    evento.fechaFin,
                   );
                   if (Object.keys(e).length > 0) return false;
                   const problema = validarCapacidadesTarea(
@@ -3144,6 +3110,7 @@ function TaskEditor({
       { ...tarea, estimacion: horas } as unknown as Subtarea,
       evento.fechaInicio,
       Math.max(evento.duracion, tareaInicial?.estimacion ?? 0),
+      evento.fechaFin,
     );
     if (Object.keys(errs).length > 0) {
       setError(errs);
@@ -3188,7 +3155,8 @@ function TaskEditor({
             type="date"
             className={error.fechaLimite ? "error" : ""}
             data-testid="task-deadline-input"
-            max={evento.fechaInicio}
+            min={evento.fechaInicio}
+            max={evento.fechaFin}
             value={tarea.fechaLimite}
             aria-invalid={Boolean(error.fechaLimite)}
             aria-describedby={
@@ -3199,7 +3167,8 @@ function TaskEditor({
             }
           />
           <small className="field-hint" id="gestion-fecha-ayuda">
-            Máximo {fechaBonita(evento.fechaInicio, true)}: el evento empieza ese día.
+            Entre {fechaBonita(evento.fechaInicio, true)} y{" "}
+            {fechaBonita(evento.fechaFin, true)}: fechas del evento.
           </small>
         </div>
         <div className="field">
@@ -3693,6 +3662,7 @@ function ReprogramarDialog({
       { ...tarea, fechaLimite: fechaPropuesta, horaInicio, estimacion: horas },
       evento?.fechaInicio,
       maximoEstimacion,
+      evento?.fechaFin,
     );
     if (Object.keys(problema).length > 0) {
       setErrores(problema);
@@ -3859,7 +3829,8 @@ function ReprogramarDialog({
               <input
                 id="reprogramar-fecha"
                 type="date"
-                max={evento?.fechaInicio}
+                min={evento?.fechaInicio}
+                max={evento?.fechaFin}
                 value={fecha}
                 data-testid="reprogramar-fecha"
                 className={errores.fechaLimite ? "error" : ""}
@@ -3880,8 +3851,8 @@ function ReprogramarDialog({
               />
               {evento && (
                 <small className="field-hint" id="reprogramar-fecha-ayuda">
-                  No puede pasar del inicio del evento (
-                  {fechaBonita(evento.fechaInicio, true)}).
+                  Debe estar entre {fechaBonita(evento.fechaInicio, true)} y{" "}
+                  {fechaBonita(evento.fechaFin, true)}.
                 </small>
               )}
             </div>
@@ -4142,7 +4113,6 @@ function Progreso() {
 
   const porcentajeGlobal =
     totalTareas === 0 ? 0 : Math.round((tareasCompletadas / totalTareas) * 100);
-  const eventosCancelados = eventos.filter((e) => e.cancelado).length;
 
   return (
     <div>
@@ -4223,32 +4193,6 @@ function Progreso() {
                 {tareasCompletadas}{" "}
                 <span style={{ fontSize: "16px", color: "#555" }}>
                   / {totalTareas}
-                </span>
-              </div>
-            </div>
-            <div className="card card-pad">
-              <div
-                style={{
-                  color: "var(--apagado)",
-                  fontSize: "12px",
-                  marginBottom: "10px",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                  fontWeight: 500,
-                }}
-              >
-                Eventos Cancelados
-              </div>
-              <div
-                style={{
-                  fontSize: "42px",
-                  color: "var(--ambar)",
-                  fontWeight: 300,
-                }}
-              >
-                {eventosCancelados}{" "}
-                <span style={{ fontSize: "16px", color: "#555" }}>
-                  / {totalEventos}
                 </span>
               </div>
             </div>
@@ -5319,7 +5263,7 @@ function RecuperarPasswordPage() {
                     fontWeight: 500,
                   }}
                 >
-                  â† Volver al inicio de sesión
+                  ← Volver al inicio de sesión
                 </span>
               </div>
             </form>
