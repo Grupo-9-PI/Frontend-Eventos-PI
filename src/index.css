@@ -468,6 +468,13 @@ p {
   color: var(--salvia);
   border-color: rgba(111, 174, 134, 0.45);
 }
+/* Highlight de gestión reprogramada (el servidor marca reprogramada_en). */
+.tag-reprogramada {
+  color: var(--azul-claro);
+  border-color: rgba(44, 102, 147, 0.55);
+  background: rgba(44, 102, 147, 0.12);
+  font-weight: 500;
+}
 .tag-high {
   color: #ef927c;
 }

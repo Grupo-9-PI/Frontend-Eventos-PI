@@ -1058,6 +1058,16 @@ function FilaTarea({
             <span className="tag tag-urgent">En curso</span>
           )}
           {hecha && <span className="tag tag-done">Hecha</span>}
+          {tarea.reprogramadaEn && (
+            <span
+              className="tag tag-reprogramada"
+              title={`Reprogramada el ${fechaBonita(
+                tarea.reprogramadaEn.slice(0, 10),
+              )}`}
+            >
+              Reprogramada
+            </span>
+          )}
         </div>
         {motivo && (
           <div className="task-note" data-testid={`task-note-${tarea.id}`}>
