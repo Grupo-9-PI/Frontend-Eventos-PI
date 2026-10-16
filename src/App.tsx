@@ -4027,8 +4027,8 @@ function ReprogramarDialog({
                     ))
                   ) : (
                     <p>
-                      No encontramos un día libre en los próximos 90 días. Elige
-                      otra fecha manualmente.
+                      No encontramos otro día con capacidad dentro de las fechas
+                      del evento. Elige otra fecha manualmente.
                     </p>
                   )}
                   <div className="capacity-conflict-option">
