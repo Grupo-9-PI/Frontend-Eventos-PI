@@ -18,6 +18,8 @@ export type Subtarea = {
   estimacion: number;
   /** Motivo del último movimiento (opcional). */
   motivoMovimiento?: string;
+  /** Última fecha de reprogramación (ISO); la escribe el servidor. */
+  reprogramadaEn?: string;
 };
 
 export type FechaSugerida = {
@@ -170,6 +172,7 @@ function mapSubtareaFromApi(t: any): Subtarea {
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
     motivoMovimiento: t.motivo_movimiento ?? "",
+    reprogramadaEn: t.reprogramada_en ?? undefined,
   };
 }
 
@@ -511,6 +514,7 @@ function mapTareaHoyFromApi(t: any): TareaHoy {
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
     motivoMovimiento: t.motivo_movimiento ?? "",
+    reprogramadaEn: t.reprogramada_en ?? undefined,
     eventoId: t.evento.id.toString(),
     eventoNombre: t.evento.nombre,
   };
