@@ -1,6 +1,6 @@
 ﻿import { api, mensajeDeError } from "@/services/api";
 
-export type EstadoSubtarea = "pendiente" | "en_progreso" | "hecho";
+export type EstadoSubtarea = "pendiente" | "en_progreso" | "hecho" | "pospuesta";
 export type Prioridad = "alta" | "media" | "baja";
 
 /** Clasificación que calcula el servidor para los filtros de /eventos. */
@@ -18,6 +18,8 @@ export type Subtarea = {
   estimacion: number;
   /** Motivo del último movimiento (opcional). */
   motivoMovimiento?: string;
+  /** Motivo opcional de la posposición (US-09). */
+  notaPospuesta?: string;
   /** Última fecha de reprogramación (ISO); la escribe el servidor. */
   reprogramadaEn?: string;
 };
@@ -172,6 +174,7 @@ function mapSubtareaFromApi(t: any): Subtarea {
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
     motivoMovimiento: t.motivo_movimiento ?? "",
+    notaPospuesta: t.nota_pospuesta ?? "",
     reprogramadaEn: t.reprogramada_en ?? undefined,
   };
 }
@@ -230,6 +233,7 @@ function mapSubtareaToApi(eventoId: string, t: Omit<Subtarea, "id">) {
     hora_inicio: t.horaInicio || null,
     hora_limite: t.horaInicio ? undefined : t.horaLimite || undefined,
     motivo_movimiento: t.motivoMovimiento ?? "",
+    nota_pospuesta: t.notaPospuesta ?? "",
   };
 }
 
@@ -350,10 +354,38 @@ export const repositorioEventos = {
     }
   },
 
+  async posponer(
+    id: string,
+    cambios: {
+      fechaLimite?: string;
+      horaInicio?: string;
+      nota?: string;
+    },
+  ): Promise<Resultado<Subtarea>> {
+    try {
+      const response = await api.patch(`/subtareas/${id}/posponer/`, {
+        plazo: cambios.fechaLimite || undefined,
+        hora_inicio: cambios.horaInicio || undefined,
+        nota_pospuesta: cambios.nota ?? "",
+      });
+      return { ok: true, data: mapSubtareaFromApi(response.data) };
+    } catch (e: any) {
+      return {
+        ok: false,
+        error: errorDe(e, "No se pudo posponer la gestión."),
+      };
+    }
+  },
+
   async resolverConflicto(
     id: string,
-    estrategia: "mover_otro_dia" | "reducir_horas",
-    datos: { plazo?: string; horaLimite?: string; estimacion?: number },
+    estrategia: "mover_otro_dia" | "reducir_horas" | "posponer",
+    datos: {
+      plazo?: string;
+      horaLimite?: string;
+      estimacion?: number;
+      nota?: string;
+    },
   ): Promise<Resultado<RespuestaResolverConflicto>> {
     try {
       const response = await api.post(`/subtareas/${id}/resolver-conflicto/`, {
@@ -361,6 +393,7 @@ export const repositorioEventos = {
         plazo: datos.plazo,
         hora_limite: datos.horaLimite,
         estimacion_horas: datos.estimacion,
+        nota_pospuesta: datos.nota,
       });
       const d = response.data;
       return {
@@ -501,6 +534,11 @@ export type RespuestaHoy = {
   grupos: GruposHoy;
 };
 
+export type FiltrosHoy = {
+  evento?: string;
+  estado?: string;
+};
+
 // El endpoint /hoy usa nombres propios (titulo, fecha_limite), distintos a /subtareas/.
 function mapTareaHoyFromApi(t: any): TareaHoy {
   return {
@@ -514,6 +552,7 @@ function mapTareaHoyFromApi(t: any): TareaHoy {
     horaInicio: t.hora_inicio ? t.hora_inicio.slice(0, 5) : undefined,
     estimacion: Number(t.estimacion_horas),
     motivoMovimiento: t.motivo_movimiento ?? "",
+    notaPospuesta: t.nota_pospuesta ?? "",
     reprogramadaEn: t.reprogramada_en ?? undefined,
     eventoId: t.evento.id.toString(),
     eventoNombre: t.evento.nombre,
@@ -521,10 +560,7 @@ function mapTareaHoyFromApi(t: any): TareaHoy {
 }
 
 export const repositorioHoy = {
-  async cargar(filtros?: {
-    evento?: string;
-    estado?: string;
-  }): Promise<Resultado<RespuestaHoy>> {
+  async cargar(filtros?: FiltrosHoy): Promise<Resultado<RespuestaHoy>> {
     try {
       const response = await api.get("/hoy/", { params: filtros });
       const datos = response.data;

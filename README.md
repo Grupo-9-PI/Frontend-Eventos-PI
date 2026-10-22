@@ -32,12 +32,17 @@ La aplicación queda en <http://localhost:5173>. El backend debe estar corriendo
   (`/hoy`, `/eventos`, `/crear`, `/evento/:id`, `/progreso`, `/opciones`) redirigen al login sin
   sesión.
 - **Vista Hoy**: consume `/api/hoy/` y muestra las gestiones agrupadas en **Vencidas**, **Para hoy**
-  y **Próximas**, ya ordenadas por el backend. Debajo del encabezado resume las horas planificadas
-  del día frente al límite diario. Incluye la regla de prioridad visible y los estados
-  de carga, error con botón de reintento y vacío con acción sugerida.
-- **Eventos**: listado con filtros por estado de agenda (activos y retrasados, pasados, cancelados,
-  todos), creación con plan inicial opcional, detalle con gestión de tareas (agregar, editar, mover
-  con motivo opcional, eliminar, marcar hecha) y página de progreso.
+  y **Próximas**, ya ordenadas por el backend. Incluye filtros por **evento** y **estado**
+  (abiertas, pendientes, en progreso, hechas, pospuestas, todas), la regla de prioridad visible y
+  los estados de carga, error con reintento y vacío por filtro. Debajo del encabezado resume las
+  horas planificadas del día frente al límite diario.
+- **Eventos**: listado con filtros por estado de agenda (activos y retrasados, pasados, todos),
+  creación con plan inicial opcional, detalle con gestión de tareas (agregar, editar, mover con
+  motivo opcional, posponer con nota y fecha opcional, reactivar, eliminar, marcar hecha) y página
+  de progreso.
+- **Posponer**: `PATCH /api/subtareas/{id}/posponer/` cambia el estado a `pospuesta`, guarda el
+  motivo y, si se indica una fecha, también reprograma la gestión. Las pospuestas salen de la
+  carga de Hoy y se pueden consultar con el filtro de estado.
 - **Opciones**: límite diario de trabajo del organizador, de 1 a 24 horas.
 - Tema claro/oscuro y avisos de éxito/error.
 
