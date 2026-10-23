@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  CalendarClock,
   CalendarDays,
   Check,
   ChevronRight,
@@ -58,6 +59,7 @@ import {
   type Evento,
   type EventoPayload,
   type EstadoSubtarea,
+  type FiltrosHoy,
   type GruposHoy,
   type Prioridad,
   type RespuestaHoy,
@@ -77,9 +79,15 @@ type Store = {
   errorCarga: string;
   aviso: Aviso | null;
   limiteDiario: number;
+  filtrosHoy: FiltrosHoy;
+  cambiarFiltrosHoy: (filtros: FiltrosHoy) => void;
   refrescar: () => void;
   quitarAviso: () => void;
   actualizarLimiteDiario: (horas: number) => Promise<string | null>;
+  posponerSubtarea: (
+    id: string,
+    cambios: { fechaLimite?: string; horaInicio?: string; nota?: string },
+  ) => Promise<Resultado<Subtarea>>;
   reprogramarSubtarea: (
     id: string,
     cambios: {
@@ -91,8 +99,13 @@ type Store = {
   ) => Promise<ResultadoReprogramacion>;
   resolverConflictoSubtarea: (
     id: string,
-    estrategia: "mover_otro_dia" | "reducir_horas",
-    datos: { plazo?: string; horaLimite?: string; estimacion?: number },
+    estrategia: "mover_otro_dia" | "reducir_horas" | "posponer",
+    datos: {
+      plazo?: string;
+      horaLimite?: string;
+      estimacion?: number;
+      nota?: string;
+    },
   ) => Promise<Resultado<RespuestaResolverConflicto>>;
   crearEventoCompleto: (
     evento: EventoPayload,
@@ -121,16 +134,20 @@ function useDatos(activo: boolean) {
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [hoy, setHoy] = useState<RespuestaHoy | null>(null);
   const [limiteDiario, setLimiteDiario] = useState(LIMITE_DIARIO_PREDETERMINADO);
+  const [filtrosHoy, setFiltrosHoy] = useState<FiltrosHoy>({});
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState("");
   const [aviso, setAviso] = useState<Aviso | null>(null);
 
-  const cargarTodo = async (mostrarCarga = true) => {
+  const cargarTodo = async (
+    mostrarCarga = true,
+    filtros: FiltrosHoy = filtrosHoy,
+  ) => {
     if (mostrarCarga) setCargando(true);
     const inicio = Date.now();
     const [resEventos, resHoy, resConfig] = await Promise.all([
       repositorioEventos.cargar(),
-      repositorioHoy.cargar(),
+      repositorioHoy.cargar(filtros),
       repositorioConfiguracion.cargar(),
     ]);
     const errores: string[] = [];
@@ -151,11 +168,17 @@ function useDatos(activo: boolean) {
     }
   };
 
+  const cambiarFiltrosHoy = (filtros: FiltrosHoy) => {
+    setFiltrosHoy(filtros);
+    if (activo) void cargarTodo(false, filtros);
+  };
+
   useEffect(() => {
     if (!activo) {
       setEventos([]);
       setHoy(null);
       setLimiteDiario(LIMITE_DIARIO_PREDETERMINADO);
+      setFiltrosHoy({});
       setErrorCarga("");
       setCargando(false);
       return;
@@ -215,6 +238,12 @@ function useDatos(activo: boolean) {
 
   /** Microcopy de confirmación según la acción que acaba de hacer el organizador. */
   const microcopyEstado = (t: Subtarea, hechos: number, total: number) => {
+    if (t.estado === "pospuesta") {
+      const nota = t.notaPospuesta?.trim();
+      return nota
+        ? `Gestión pospuesta: «${t.titulo}». Quedó anotado: ${nota}.`
+        : `Gestión pospuesta: «${t.titulo}» salió de tu carga de hoy.`;
+    }
     if (t.estado !== "hecho")
       return `Gestión reabierta: «${t.titulo}» vuelve a la carga de hoy.`;
     const plural = hechos === 1 ? "1 gestión ejecutada" : `${hechos} gestiones ejecutadas`;
@@ -284,7 +313,11 @@ function useDatos(activo: boolean) {
 
   const actualizarSubtarea = async (eId: string, t: Subtarea) => {
     // Reacción inmediata: /hoy descuenta la carga urgente sin recargar.
-    reflejarEnMemoria(t.id, { estado: t.estado }, esVisibleEnHoy(t.estado));
+    reflejarEnMemoria(
+      t.id,
+      { estado: t.estado, notaPospuesta: t.notaPospuesta },
+      esVisibleEnHoy(t.estado),
+    );
     const res = await repositorioEventos.actualizarSubtarea(eId, t);
     if (!res.ok) {
       notifyError(res.error);
@@ -339,17 +372,44 @@ function useDatos(activo: boolean) {
     }
     return res;
   };
+  const posponerSubtarea = async (
+    id: string,
+    cambios: { fechaLimite?: string; horaInicio?: string; nota?: string },
+  ) => {
+    const res = await repositorioEventos.posponer(id, cambios);
+    if (!res.ok) {
+      notifyError(res.error);
+      return res;
+    }
+    await cargarTodo(false);
+    const nota = res.data.notaPospuesta?.trim();
+    const movimiento = cambios.fechaLimite
+      ? ` Se movió al ${fechaHoraBonita(cambios.fechaLimite, cambios.horaInicio || undefined)}.`
+      : "";
+    const detalle = nota ? ` Motivo: ${nota}.` : "";
+    notifySuccess(
+      `Gestión pospuesta: «${res.data.titulo}».${movimiento}${detalle}`,
+    );
+    return res;
+  };
   const resolverConflictoSubtarea = async (
     id: string,
-    estrategia: "mover_otro_dia" | "reducir_horas",
-    datos: { plazo?: string; horaLimite?: string; estimacion?: number },
+    estrategia: "mover_otro_dia" | "reducir_horas" | "posponer",
+    datos: {
+      plazo?: string;
+      horaLimite?: string;
+      estimacion?: number;
+      nota?: string;
+    },
   ) => {
     const res = await repositorioEventos.resolverConflicto(id, estrategia, datos);
     if (res.ok) {
       await cargarTodo(false);
       if (res.data.resuelto) {
         notifySuccess(
-          "Conflicto resuelto: el plan del día quedó dentro de tu capacidad.",
+          estrategia === "posponer"
+            ? "Gestión pospuesta: salió de la carga del día y el conflicto quedó resuelto."
+            : "Conflicto resuelto: el plan del día quedó dentro de tu capacidad.",
         );
       }
     }
@@ -363,9 +423,12 @@ function useDatos(activo: boolean) {
     errorCarga,
     aviso,
     limiteDiario,
+    filtrosHoy,
+    cambiarFiltrosHoy,
     refrescar: cargarTodo,
     quitarAviso: () => setAviso(null),
     actualizarLimiteDiario,
+    posponerSubtarea,
     reprogramarSubtarea,
     resolverConflictoSubtarea,
     crearEventoCompleto,
@@ -557,9 +620,22 @@ function Shell() {
       ? "light"
       : "dark";
   });
-  const { eventos, hoy, cargando } = useStore();
+  const { eventos, cargando } = useStore();
   const [location, setLocation] = useLocation();
-  const retrasadas = hoy?.grupos.vencidas.length ?? 0;
+  // El contador lateral no debe cambiar cuando se filtra la vista Hoy.
+  const retrasadas = eventos.reduce(
+    (total, evento) =>
+      evento.cancelado
+        ? total
+        : total +
+          evento.subtareas.filter(
+            (t) =>
+              t.estado !== "hecho" &&
+              t.estado !== "pospuesta" &&
+              estaVencida(t),
+          ).length,
+    0,
+  );
   const activos = eventos.filter(estaActivo).length;
   const [eventoActivo, setEventoActivo] = useState("");
   const navegarEvento = (id: string) => {
@@ -920,9 +996,9 @@ function calcularPorcentaje(evento: Evento) {
       )
     : 0;
 }
-/** Una gestión ejecutada deja de contar como carga urgente de hoy. */
+/** Una gestión ejecutada o pospuesta deja de contar como carga urgente de hoy. */
 function esVisibleEnHoy(estado: EstadoSubtarea) {
-  return estado !== "hecho";
+  return estado !== "hecho" && estado !== "pospuesta";
 }
 /** Réplica de `estado_agenda` del servidor, para no depender del round-trip. */
 function estaActivo(evento: Evento) {
@@ -948,7 +1024,10 @@ function BarraProgresoEvento({
 }) {
   const total = evento.subtareas.length;
   const ejecutadas = evento.subtareas.filter((t) => t.estado === "hecho").length;
-  const abiertas = total - ejecutadas;
+  const pospuestas = evento.subtareas.filter(
+    (t) => t.estado === "pospuesta",
+  ).length;
+  const abiertas = total - ejecutadas - pospuestas;
   const porcentaje = calcularPorcentaje(evento);
 
   return (
@@ -982,6 +1061,8 @@ function BarraProgresoEvento({
         <span aria-live="polite">
           {ejecutadas} de {total}{" "}
           {total === 1 ? "gestión ejecutada" : "gestiones ejecutadas"}
+          {pospuestas > 0 &&
+            ` · ${pospuestas} pospuesta${pospuestas === 1 ? "" : "s"}`}
           {abiertas > 0 &&
             ` · ${abiertas} abierta${abiertas === 1 ? "" : "s"}`}
         </span>
@@ -1012,6 +1093,8 @@ function FilaTarea({
   mostrarEvento,
   onToggle,
   onReprogramar,
+  onPosponer,
+  onReactivar,
   onEditar,
   onEliminar,
 }: {
@@ -1019,17 +1102,28 @@ function FilaTarea({
   mostrarEvento?: boolean;
   onToggle: () => void;
   onReprogramar: () => void;
+  onPosponer?: () => void;
+  onReactivar?: () => void;
   onEditar?: () => void;
   onEliminar?: () => void;
 }) {
   const fecha = estadoFecha(tarea);
   const hecha = tarea.estado === "hecho";
+  const pospuesta = tarea.estado === "pospuesta";
   const motivo = tarea.motivoMovimiento?.trim();
+  const notaPospuesta = tarea.notaPospuesta?.trim();
   const categoria = CATEGORIAS_GESTION.find(
     (c) => c.valor === tarea.categoria,
   )?.etiqueta;
   return (
-    <div className={"task-row " + fecha + (hecha ? " done" : "")}>
+    <div
+      className={
+        "task-row " +
+        fecha +
+        (hecha ? " done" : "") +
+        (pospuesta ? " pospuesta" : "")
+      }
+    >
       <input
         className="task-check"
         type="checkbox"
@@ -1058,6 +1152,7 @@ function FilaTarea({
             <span className="tag tag-urgent">En curso</span>
           )}
           {hecha && <span className="tag tag-done">Hecha</span>}
+          {pospuesta && <span className="tag tag-pospuesta">Pospuesta</span>}
           {tarea.reprogramadaEn && (
             <span
               className="tag tag-reprogramada"
@@ -1074,6 +1169,17 @@ function FilaTarea({
             <div>
               <span className="task-note-label">Motivo del movimiento</span>
               <p>{motivo}</p>
+            </div>
+          </div>
+        )}
+        {notaPospuesta && (
+          <div
+            className="task-note task-note-pospuesta"
+            data-testid={`task-postpone-note-${tarea.id}`}
+          >
+            <div>
+              <span className="task-note-label">Motivo de la posposición</span>
+              <p>{notaPospuesta}</p>
             </div>
           </div>
         )}
@@ -1097,6 +1203,26 @@ function FilaTarea({
         >
           <Clock3 size={13} /> Mover
         </button>
+        {onPosponer && !hecha && !pospuesta && (
+          <button
+            className="button button-small button-secondary"
+            onClick={onPosponer}
+            data-testid={`posponer-${tarea.id}`}
+            title="Posponer gestión"
+          >
+            <CalendarClock size={13} /> Posponer
+          </button>
+        )}
+        {pospuesta && onReactivar && (
+          <button
+            className="button button-small button-ghost"
+            onClick={onReactivar}
+            data-testid={`reactivar-${tarea.id}`}
+            title="Reactivar gestión"
+          >
+            <RotateCcw size={13} /> Reactivar
+          </button>
+        )}
         {hecha && (
           <button
             className="button button-small button-ghost"
@@ -1143,7 +1269,9 @@ function validarCapacidadesTarea(
     eventos,
     candidata.fechaLimite,
     tareaExistenteId ? { eventoId, tareaId: tareaExistenteId } : undefined,
-    candidata.estado === "hecho" ? 0 : candidata.estimacion,
+    candidata.estado === "hecho" || candidata.estado === "pospuesta"
+      ? 0
+      : candidata.estimacion,
   );
   if (totalDia > limiteDiario) {
     return `El ${fechaBonita(candidata.fechaLimite, true)} quedaría en ${formatoHoras(totalDia)} h de ${limiteDiario} h de capacidad diaria (exceso ${formatoHoras(totalDia - limiteDiario)} h).`;
@@ -1164,6 +1292,7 @@ function sumarHorasAbiertas(
         if (
           evento.cancelado ||
           tarea.estado === "hecho" ||
+          tarea.estado === "pospuesta" ||
           tarea.fechaLimite !== fecha ||
           (excluir?.eventoId === evento.id && excluir.tareaId === tarea.id)
         )
@@ -1535,6 +1664,15 @@ function Opciones() {
   );
 }
 
+const ESTADOS_HOY: { valor: string; etiqueta: string }[] = [
+  { valor: "abiertas", etiqueta: "Abiertas" },
+  { valor: "pendiente", etiqueta: "Pendientes" },
+  { valor: "en_progreso", etiqueta: "En progreso" },
+  { valor: "hecho", etiqueta: "Hechas" },
+  { valor: "pospuesta", etiqueta: "Pospuestas" },
+  { valor: "todas", etiqueta: "Todas" },
+];
+
 function Hoy() {
   const {
     eventos,
@@ -1543,8 +1681,11 @@ function Hoy() {
     refrescar,
     actualizarSubtarea,
     limiteDiario,
+    filtrosHoy,
+    cambiarFiltrosHoy,
   } = useStore();
   const [reprogramar, setReprogramar] = useState<TareaHoy | null>(null);
+  const [posponer, setPosponer] = useState<TareaHoy | null>(null);
 
   const grupos: GruposHoy = hoy?.grupos ?? {
     vencidas: [],
@@ -1553,13 +1694,24 @@ function Hoy() {
   };
   const total = hoy?.total ?? 0;
   const cargaHoy = sumarHorasAbiertas(eventos, hoyISO());
+  const hayFiltros =
+    Boolean(filtrosHoy.evento) ||
+    Boolean(filtrosHoy.estado && filtrosHoy.estado !== "abiertas");
+  const estadoActual = filtrosHoy.estado ?? "abiertas";
 
   const cambiarEstado = (tarea: TareaHoy) => {
     actualizarSubtarea(tarea.eventoId, {
       ...tarea,
       estado: tarea.estado === "hecho" ? "pendiente" : "hecho",
+      notaPospuesta: "",
     });
   };
+  const reactivar = (tarea: TareaHoy) =>
+    actualizarSubtarea(tarea.eventoId, {
+      ...tarea,
+      estado: "pendiente",
+      notaPospuesta: "",
+    });
 
   const bloque = (titulo: string, lista: TareaHoy[], vacio: string) => (
     <section className="hoy-section">
@@ -1581,6 +1733,8 @@ function Hoy() {
               mostrarEvento
               onToggle={() => cambiarEstado(t)}
               onReprogramar={() => setReprogramar(t)}
+              onPosponer={() => setPosponer(t)}
+              onReactivar={() => reactivar(t)}
             />
           ))}
         </div>
@@ -1619,8 +1773,12 @@ function Hoy() {
 
   const descripcionHoy =
     total > 0
-      ? `${total} ${total === 1 ? "gestión urgente" : "gestiones urgentes"}.`
-      : "El plan está despejado.";
+      ? `${total} ${total === 1 ? "gestión" : "gestiones"}${
+          hayFiltros ? " con los filtros activos" : " urgentes"
+        }.`
+      : hayFiltros
+        ? "No hay gestiones para estos filtros."
+        : "El plan está despejado.";
 
   return (
     <div>
@@ -1642,6 +1800,69 @@ function Hoy() {
           testId="hoy-horas-planificadas"
         />
       </div>
+      {eventos.length > 0 && (
+        <div className="filter-row hoy-filtros">
+          <label htmlFor="hoy-filtro-evento" className="muted">
+            Evento
+          </label>
+          <select
+            id="hoy-filtro-evento"
+            data-testid="hoy-filtro-evento"
+            value={filtrosHoy.evento ?? ""}
+            onChange={(event) =>
+              cambiarFiltrosHoy({
+                ...filtrosHoy,
+                evento: event.target.value || undefined,
+              })
+            }
+          >
+            <option value="">Todos los eventos</option>
+            {eventos
+              .filter((evento) => !evento.cancelado)
+              .map((evento) => (
+                <option key={evento.id} value={evento.id}>
+                  {evento.nombre}
+                </option>
+              ))}
+          </select>
+          <label htmlFor="hoy-filtro-estado" className="muted">
+            Estado
+          </label>
+          <select
+            id="hoy-filtro-estado"
+            data-testid="hoy-filtro-estado"
+            value={estadoActual}
+            onChange={(event) =>
+              cambiarFiltrosHoy({
+                ...filtrosHoy,
+                estado:
+                  event.target.value === "abiertas"
+                    ? undefined
+                    : event.target.value,
+              })
+            }
+          >
+            {ESTADOS_HOY.map((estado) => (
+              <option key={estado.valor} value={estado.valor}>
+                {estado.etiqueta}
+              </option>
+            ))}
+          </select>
+          {hayFiltros && (
+            <button
+              type="button"
+              className="button button-ghost button-small"
+              onClick={() => cambiarFiltrosHoy({})}
+              data-testid="limpiar-filtros-hoy"
+            >
+              <X size={13} /> Limpiar filtros
+            </button>
+          )}
+          <span className="muted hoy-filtros-resumen">
+            {total} {total === 1 ? "gestión visible" : "gestiones visibles"}
+          </span>
+        </div>
+      )}
       {eventos.length === 0 ? (
         <EmptyState
           titulo="Todavía no hay eventos"
@@ -1654,17 +1875,31 @@ function Hoy() {
         />
       ) : (
         <>
-          {total === 0 && (
-            <EmptyState
-              titulo="No hay gestiones pendientes"
-              copy="Todo lo que vencía hoy está hecho. Puedes revisar tus eventos o crear uno nuevo."
-              accion={
-                <Link href="/eventos" className="button button-secondary">
-                  Ver eventos
-                </Link>
-              }
-            />
-          )}
+          {total === 0 &&
+            (hayFiltros ? (
+              <EmptyState
+                titulo="No hay gestiones para estos filtros"
+                copy="Prueba con otro evento o estado; tus gestiones siguen guardadas."
+                accion={
+                  <button
+                    className="button button-secondary"
+                    onClick={() => cambiarFiltrosHoy({})}
+                  >
+                    Limpiar filtros
+                  </button>
+                }
+              />
+            ) : (
+              <EmptyState
+                titulo="No hay gestiones pendientes"
+                copy="Todo lo que vencía hoy está hecho. Puedes revisar tus eventos o crear uno nuevo."
+                accion={
+                  <Link href="/eventos" className="button button-secondary">
+                    Ver eventos
+                  </Link>
+                }
+              />
+            ))}
           {total > 0 && (
             <>
               {bloque("Vencidas", grupos.vencidas, "No hay gestiones vencidas.")}
@@ -1679,6 +1914,13 @@ function Hoy() {
           tarea={reprogramar}
           evento={eventos.find((e) => e.id === reprogramar.eventoId)}
           onClose={() => setReprogramar(null)}
+        />
+      )}
+      {posponer && (
+        <PosponerDialog
+          tarea={posponer}
+          evento={eventos.find((e) => e.id === posponer.eventoId)}
+          onClose={() => setPosponer(null)}
         />
       )}
     </div>
@@ -2870,6 +3112,7 @@ function DetalleEvento() {
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null);
   const [mover, setMover] = useState<Subtarea | null>(null);
+  const [posponer, setPosponer] = useState<Subtarea | null>(null);
   const [editarEvento, setEditarEvento] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState<{
     tipo: "evento" | "tarea";
@@ -2894,6 +3137,13 @@ function DetalleEvento() {
     await actualizarSubtarea(evento.id, {
       ...tarea,
       estado: tarea.estado === "hecho" ? "pendiente" : "hecho",
+      notaPospuesta: "",
+    });
+  const reactivar = async (tarea: Subtarea) =>
+    await actualizarSubtarea(evento.id, {
+      ...tarea,
+      estado: "pendiente",
+      notaPospuesta: "",
     });
   const eliminar = async (tarea: Subtarea) => {
     setConfirmarEliminar({ tipo: "tarea", id: tarea.id, nombre: tarea.titulo });
@@ -2919,7 +3169,10 @@ function DetalleEvento() {
   // La lista no se reordena al completar: la fila conserva su sitio y solo
   // cambia su estado visual, para que la casilla no salte de posición.
   const gestionadas = evento.subtareas;
-  const abiertas = gestionadas.filter((t) => t.estado !== "hecho");
+  const abiertas = gestionadas.filter(
+    (t) => t.estado !== "hecho" && t.estado !== "pospuesta",
+  );
+  const pospuestas = gestionadas.filter((t) => t.estado === "pospuesta");
   const completadas = gestionadas.filter((t) => t.estado === "hecho");
   const porcentaje = calcularPorcentaje(evento);
   return (
@@ -2936,6 +3189,10 @@ function DetalleEvento() {
               {abiertas.length === 1
                 ? "gestión abierta"
                 : "gestiones abiertas"}
+              {pospuestas.length > 0 &&
+                ` · ${pospuestas.length} pospuesta${
+                  pospuestas.length === 1 ? "" : "s"
+                }`}
               {completadas.length > 0 && ` · ${completadas.length} hecha${
                 completadas.length === 1 ? "" : "s"
               }`}
@@ -3030,6 +3287,13 @@ function DetalleEvento() {
           onClose={() => setMover(null)}
         />
       )}
+      {posponer && (
+        <PosponerDialog
+          tarea={posponer}
+          evento={evento}
+          onClose={() => setPosponer(null)}
+        />
+      )}
       <div className="detail-layout">
         <section>
           {mostrarAgregar && (
@@ -3067,6 +3331,8 @@ function DetalleEvento() {
                   tarea={t}
                   onToggle={() => toggle(t)}
                   onReprogramar={() => setMover(t)}
+                  onPosponer={() => setPosponer(t)}
+                  onReactivar={() => reactivar(t)}
                   onEditar={() => setTareaEditar(t)}
                   onEliminar={() => eliminar(t)}
                 />
@@ -3632,6 +3898,152 @@ function EventoEditorDialog({
   );
 }
 
+function PosponerDialog({
+  tarea,
+  evento,
+  onClose,
+}: {
+  tarea: Subtarea;
+  evento?: Evento;
+  onClose: () => void;
+}) {
+  const { posponerSubtarea } = useStore();
+  const [fecha, setFecha] = useState("");
+  const [horaInicio, setHoraInicio] = useState(
+    tarea.horaInicio ?? tarea.horaLimite?.slice(0, 5) ?? "09:00",
+  );
+  const [nota, setNota] = useState(tarea.notaPospuesta ?? "");
+  const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const confirmar = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    if (fecha && evento) {
+      if (fecha < evento.fechaInicio || fecha > evento.fechaFin) {
+        setError(
+          `La nueva fecha debe estar entre el inicio y el fin del evento (${fechaBonita(
+            evento.fechaInicio,
+            true,
+          )} – ${fechaBonita(evento.fechaFin, true)}).`,
+        );
+        return;
+      }
+      if (!horaInicio) {
+        setError("Indica la hora de comienzo para la nueva fecha.");
+        return;
+      }
+    }
+    setGuardando(true);
+    const res = await posponerSubtarea(tarea.id, {
+      fechaLimite: fecha || undefined,
+      horaInicio: fecha ? horaInicio : undefined,
+      nota: nota.trim(),
+    });
+    setGuardando(false);
+    if (res.ok) onClose();
+    else setError(res.error);
+  };
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={onClose}>
+      <form
+        className="dialog dialog-mover dialog-posponer"
+        onSubmit={confirmar}
+        onMouseDown={(event) => event.stopPropagation()}
+        noValidate
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="posponer-titulo"
+      >
+        <div className="dialog-body">
+          <div className="dialog-title">
+            <h2 id="posponer-titulo">Posponer gestión</h2>
+            <p>{tarea.titulo}</p>
+          </div>
+          <div className="mover-grid">
+            <div className="field">
+              <label htmlFor="posponer-fecha">
+                Nueva fecha límite{" "}
+                <span className="opcional">(opcional)</span>
+              </label>
+              <input
+                id="posponer-fecha"
+                data-testid="posponer-fecha"
+                type="date"
+                min={evento?.fechaInicio}
+                max={evento?.fechaFin}
+                value={fecha}
+                onChange={(event) => {
+                  setFecha(event.target.value);
+                  setError("");
+                }}
+              />
+              <small className="field-hint">
+                Si la dejas vacía, solo cambia el estado y la gestión sale de la
+                carga de hoy.
+              </small>
+            </div>
+            <div className="field">
+              <label htmlFor="posponer-hora">
+                Hora de comienzo{" "}
+                <span className="opcional">(si cambias la fecha)</span>
+              </label>
+              <input
+                id="posponer-hora"
+                data-testid="posponer-hora"
+                type="time"
+                value={horaInicio}
+                disabled={!fecha}
+                onChange={(event) => setHoraInicio(event.target.value)}
+              />
+              <small className="field-hint">
+                La hora límite se recalcula con la estimación actual.
+              </small>
+            </div>
+            <div className="field full">
+              <label htmlFor="posponer-nota">
+                Motivo de la posposición{" "}
+                <span className="opcional">(opcional)</span>
+              </label>
+              <textarea
+                id="posponer-nota"
+                data-testid="posponer-nota"
+                value={nota}
+                maxLength={500}
+                placeholder="ej. esperando confirmación del proveedor"
+                onChange={(event) => setNota(event.target.value)}
+              />
+            </div>
+          </div>
+          {error && (
+            <div className="error-box" role="alert">
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="form-actions">
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={onClose}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={guardando}
+            data-testid="confirmar-posponer"
+          >
+            {guardando ? "Guardando…" : "Posponer gestión"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function ReprogramarDialog({
   tarea,
   evento,
@@ -3656,6 +4068,7 @@ function ReprogramarDialog({
   const [estimacionConflicto, setEstimacionConflicto] = useState<number | null>(
     null,
   );
+  const [notaPosponer, setNotaPosponer] = useState("");
   const conflictoRef = useRef<HTMLDivElement>(null);
   const estimacionNumerica = timeToHours(estimacion);
   /**
@@ -3745,7 +4158,7 @@ function ReprogramarDialog({
       horasNuevaGestion: estimacionNumerica,
       horasTotalesProyectadas: res.data.horasTotalesProyectadas,
       horasExceso: res.data.horasExceso,
-      estrategiasDisponibles: ["mover_otro_dia", "reducir_horas"],
+      estrategiasDisponibles: ["mover_otro_dia", "reducir_horas", "posponer"],
       fechasSugeridas: res.data.fechasSugeridas,
       mensaje: res.data.mensaje,
     });
@@ -3783,10 +4196,28 @@ function ReprogramarDialog({
       horasNuevaGestion: estimacionNumerica,
       horasTotalesProyectadas: res.data.horasTotalesProyectadas,
       horasExceso: res.data.horasExceso,
-      estrategiasDisponibles: ["mover_otro_dia", "reducir_horas"],
+      estrategiasDisponibles: ["mover_otro_dia", "reducir_horas", "posponer"],
       fechasSugeridas: res.data.fechasSugeridas,
       mensaje: res.data.mensaje,
     });
+  };
+
+  const posponerConflicto = async () => {
+    setGuardando(true);
+    setError("");
+    const res = await resolverConflictoSubtarea(tarea.id, "posponer", {
+      nota: notaPosponer.trim(),
+    });
+    setGuardando(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    if (res.data.resuelto) {
+      onClose();
+      return;
+    }
+    setError(res.data.mensaje);
   };
 
   useEffect(() => {
@@ -4079,6 +4510,39 @@ function ReprogramarDialog({
                       </button>
                     </div>
                   </div>
+                  {conflicto.estrategiasDisponibles.includes("posponer") && (
+                    <div className="capacity-conflict-option">
+                      <div>
+                        <strong>Posponer la gestión</strong>
+                        <span>
+                          Sale de la carga del día sin mover la fecha.
+                        </span>
+                      </div>
+                      <div className="capacity-conflict-reduce">
+                        <input
+                          type="text"
+                          value={notaPosponer}
+                          maxLength={500}
+                          placeholder="Motivo (opcional)"
+                          aria-label="Motivo de la posposición"
+                          data-testid="conflict-postpone-note"
+                          onChange={(event) =>
+                            setNotaPosponer(event.target.value)
+                          }
+                          style={{ minWidth: 180, maxWidth: 240 }}
+                        />
+                        <button
+                          type="button"
+                          className="button button-secondary button-small"
+                          onClick={() => void posponerConflicto()}
+                          disabled={guardando}
+                          data-testid="postpone-conflict"
+                        >
+                          Posponer
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="capacity-conflict-actions">
                   <button
@@ -4119,6 +4583,9 @@ function Progreso() {
   const totalTareas = todasTareas.length;
   const tareasCompletadas = todasTareas.filter(
     (t) => t.estado === "hecho",
+  ).length;
+  const tareasPospuestas = todasTareas.filter(
+    (t) => t.estado === "pospuesta",
   ).length;
 
   const porcentajeGlobal =
@@ -4204,6 +4671,23 @@ function Progreso() {
                 <span style={{ fontSize: "16px", color: "#555" }}>
                   / {totalTareas}
                 </span>
+              </div>
+            </div>
+            <div className="card card-pad">
+              <div
+                style={{
+                  color: "var(--apagado)",
+                  fontSize: "12px",
+                  marginBottom: "10px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  fontWeight: 500,
+                }}
+              >
+                Gestiones Pospuestas
+              </div>
+              <div style={{ fontSize: "42px", color: "#fff", fontWeight: 300 }}>
+                {tareasPospuestas}
               </div>
             </div>
           </div>

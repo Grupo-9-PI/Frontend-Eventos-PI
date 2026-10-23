@@ -426,3 +426,48 @@ Todos los campos de los formularios tocados tienen `id` + `htmlFor`, `aria-inval
 | `npm run build` | Compila sin advertencias. |
 | `python manage.py test` (backend) | 54 pruebas, OK. |
 | Recorrido visual en navegador | **No automatizado**: este repo no tiene arnés de pruebas de UI ni navegador disponible en el entorno, de modo que la revisión de los escenarios (fechas inválidas, plazo fuera de rango, límite diario, motivo vacío y con texto, desplazamiento de la casilla, responsive) se hizo por revisión estática de estilos y de estados, no pulsando la interfaz. |
+
+---
+
+## Cierre de brechas del backlog: US-05 y US-09
+
+Esta sección reemplaza la decisión del Sprint 5 de retirar “Posponer”: el backend
+ya soporta el estado `pospuesta` y el campo `nota_pospuesta`, así que la interfaz
+vuelve a ofrecer la acción.
+
+### US-05 — Filtros de la vista Hoy
+
+- `/hoy` incorpora dos filtros persistidos en el estado local:
+  - **Evento**: limita las gestiones al evento seleccionado.
+  - **Estado**: abiertas, pendientes, en progreso, hechas, pospuestas o todas.
+- El filtrado se resuelve en el backend con `GET /api/hoy/?evento=...&estado=...`;
+  la regla de prioridad y la agrupación se mantienen.
+- Se añadieron el estado vacío “No hay gestiones para estos filtros”, el botón
+  **Limpiar filtros** y el contador de gestiones visibles.
+- El contador de vencidas del menú lateral se calcula sobre los eventos y no se
+  altera al filtrar la vista.
+
+### US-09 — Posponer con nota y fecha opcional
+
+- Cada fila de gestión ofrece **Posponer** (en `/hoy` y en `/evento/:id`).
+- `PosponerDialog` permite:
+  - dejar la fecha vacía: solo cambia el estado y saca la gestión de la carga de
+    hoy;
+  - indicar una fecha nueva y hora de comienzo: se reprograma y se marca como
+    pospuesta en la misma operación;
+  - escribir un motivo opcional.
+- Las gestiones pospuestas muestran la etiqueta **Pospuesta** y el bloque
+  **Motivo de la posposición**; el botón **Reactivar** las devuelve a pendientes.
+- El diálogo de conflicto de sobrecarga incorpora la opción **Posponer**, que
+  resuelve el conflicto sin mover la fecha.
+- La barra de progreso y `/progreso` distinguen las pospuestas de las abiertas y
+  de las ejecutadas.
+
+### Verificación
+
+| Comprobación | Resultado |
+| --- | --- |
+| `npm run typecheck` | 0 errores. |
+| `npm run build` | Compila sin advertencias. |
+| `python manage.py test` (backend) | 99 pruebas, OK. |
+| Recorrido E2E con Edge | Registro, creación de evento con plan, filtros por evento/estado, posponer sin fecha, posponer con fecha, reactivar, marcar hecha, progreso al 100 %, conflicto 409 con opción Posponer y redirección de ruta protegida: OK. |
