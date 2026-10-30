@@ -20,8 +20,6 @@ export type Subtarea = {
   motivoMovimiento?: string;
   /** Motivo opcional de la posposición (US-09). */
   notaPospuesta?: string;
-  /** Última fecha de reprogramación (ISO); la escribe el servidor. */
-  reprogramadaEn?: string;
 };
 
 export type FechaSugerida = {
@@ -175,7 +173,6 @@ function mapSubtareaFromApi(t: any): Subtarea {
     estimacion: Number(t.estimacion_horas),
     motivoMovimiento: t.motivo_movimiento ?? "",
     notaPospuesta: t.nota_pospuesta ?? "",
-    reprogramadaEn: t.reprogramada_en ?? undefined,
   };
 }
 
@@ -553,7 +550,6 @@ function mapTareaHoyFromApi(t: any): TareaHoy {
     estimacion: Number(t.estimacion_horas),
     motivoMovimiento: t.motivo_movimiento ?? "",
     notaPospuesta: t.nota_pospuesta ?? "",
-    reprogramadaEn: t.reprogramada_en ?? undefined,
     eventoId: t.evento.id.toString(),
     eventoNombre: t.evento.nombre,
   };
