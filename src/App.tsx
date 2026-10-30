@@ -367,7 +367,7 @@ function useDatos(activo: boolean) {
     if (res.ok) {
       await cargarTodo(false);
       notifySuccess(
-        `Gestión movida al ${fechaHoraBonita(cambios.fechaLimite, cambios.horaInicio || undefined)}.`,
+        `Nueva fecha guardada: ${fechaHoraBonita(cambios.fechaLimite, cambios.horaInicio || undefined)}.`,
       );
     }
     return res;
@@ -384,7 +384,7 @@ function useDatos(activo: boolean) {
     await cargarTodo(false);
     const nota = res.data.notaPospuesta?.trim();
     const movimiento = cambios.fechaLimite
-      ? ` Se movió al ${fechaHoraBonita(cambios.fechaLimite, cambios.horaInicio || undefined)}.`
+      ? ` Se pospuso para el ${fechaHoraBonita(cambios.fechaLimite, cambios.horaInicio || undefined)}.`
       : "";
     const detalle = nota ? ` Motivo: ${nota}.` : "";
     notifySuccess(
@@ -1091,7 +1091,6 @@ function FilaTarea({
   tarea,
   mostrarEvento,
   onToggle,
-  onReprogramar,
   onPosponer,
   onReactivar,
   onEditar,
@@ -1100,8 +1099,7 @@ function FilaTarea({
   tarea: Subtarea & { eventoNombre?: string };
   mostrarEvento?: boolean;
   onToggle: () => void;
-  onReprogramar: () => void;
-  onPosponer?: () => void;
+  onPosponer: () => void;
   onReactivar?: () => void;
   onEditar?: () => void;
   onEliminar?: () => void;
@@ -1194,15 +1192,7 @@ function FilaTarea({
             <Pencil size={13} />
           </button>
         )}
-        <button
-          className="button button-small button-secondary"
-          onClick={onReprogramar}
-          data-testid={`mover-${tarea.id}`}
-          title="Mover gestión"
-        >
-          <Clock3 size={13} /> Mover
-        </button>
-        {onPosponer && !hecha && !pospuesta && (
+        {!hecha && !pospuesta && (
           <button
             className="button button-small button-secondary"
             onClick={onPosponer}
@@ -1439,7 +1429,6 @@ function CampoHoras({
       <label htmlFor={`${id}-horas`}>
         {etiqueta} {requerido && <span className="req">*</span>}
       </label>
-      {error && <ErrorCampo id={errorId}>{error}</ErrorCampo>}
       <div
         className="horas-menu"
         data-testid={testId}
@@ -1482,7 +1471,8 @@ function CampoHoras({
           h
         </span>
       </div>
-      {!sinAyuda && (
+      {error && <ErrorCampo id={errorId}>{error}</ErrorCampo>}
+      {!sinAyuda && !error && (
         <small className="field-hint" id={ayudaId}>
           Horas y minutos (HH:MM). Mínimo{" "}
           {textoCantidadHoras(CANTIDAD_MINIMA_HORAS)}; máximo{" "}
@@ -1580,7 +1570,7 @@ function ConfiguracionCapacidadDiaria({
         <h2 id="daily-capacity-title">Límite diario de trabajo</h2>
         <p>
           Define cuántas horas de gestiones puedes planificar por día. El sistema
-          usa este límite para avisarte cuando mover una gestión produciría una
+          usa este límite para avisarte cuando posponer una gestión produciría una
           sobrecarga.
         </p>
         <IndicadorHoras
@@ -1683,7 +1673,6 @@ function Hoy() {
     filtrosHoy,
     cambiarFiltrosHoy,
   } = useStore();
-  const [reprogramar, setReprogramar] = useState<TareaHoy | null>(null);
   const [posponer, setPosponer] = useState<TareaHoy | null>(null);
 
   const grupos: GruposHoy = hoy?.grupos ?? {
@@ -1731,7 +1720,6 @@ function Hoy() {
               tarea={t}
               mostrarEvento
               onToggle={() => cambiarEstado(t)}
-              onReprogramar={() => setReprogramar(t)}
               onPosponer={() => setPosponer(t)}
               onReactivar={() => reactivar(t)}
             />
@@ -1907,13 +1895,6 @@ function Hoy() {
             </>
           )}
         </>
-      )}
-      {reprogramar && (
-        <ReprogramarDialog
-          tarea={reprogramar}
-          evento={eventos.find((e) => e.id === reprogramar.eventoId)}
-          onClose={() => setReprogramar(null)}
-        />
       )}
       {posponer && (
         <PosponerDialog
@@ -2540,9 +2521,6 @@ function CrearEvento() {
               <label htmlFor="evento-nombre">
                 Nombre <span className="req">*</span>
               </label>
-              {error.nombre && (
-                <ErrorCampo id="evento-nombre-error">{error.nombre}</ErrorCampo>
-              )}
               <input
                 id="evento-nombre"
                 className={error.nombre ? "error" : ""}
@@ -2552,10 +2530,12 @@ function CrearEvento() {
                 aria-describedby={error.nombre ? "evento-nombre-error" : undefined}
                 onChange={(e) => setCampo("nombre", e.target.value)}
               />
+              {error.nombre && (
+                <ErrorCampo id="evento-nombre-error">{error.nombre}</ErrorCampo>
+              )}
             </div>
             <div className="field">
               <label htmlFor="evento-tipo">Tipo</label>
-              {error.tipo && <ErrorCampo id="evento-tipo-error">{error.tipo}</ErrorCampo>}
               <select
                 id="evento-tipo"
                 className={error.tipo ? "error" : ""}
@@ -2572,14 +2552,12 @@ function CrearEvento() {
                 ))}
                 <option value="Otro">Otro…</option>
               </select>
+              {error.tipo && <ErrorCampo id="evento-tipo-error">{error.tipo}</ErrorCampo>}
             </div>
             <div className="field">
               <label htmlFor="evento-lugar">
                 Lugar <span className="req">*</span>
               </label>
-              {error.lugar && (
-                <ErrorCampo id="evento-lugar-error">{error.lugar}</ErrorCampo>
-              )}
               <input
                 id="evento-lugar"
                 className={error.lugar ? "error" : ""}
@@ -2589,13 +2567,15 @@ function CrearEvento() {
                 aria-describedby={error.lugar ? "evento-lugar-error" : undefined}
                 onChange={(e) => setCampo("lugar", e.target.value)}
               />
+              {error.lugar && (
+                <ErrorCampo id="evento-lugar-error">{error.lugar}</ErrorCampo>
+              )}
             </div>
             {!TIPOS_EVENTO.includes(datos.tipo) && (
               <div className="field full">
                 <label htmlFor="evento-tipo-personalizado">
                   Escribe el tipo del evento
                 </label>
-                {error.tipo && <ErrorCampo id="evento-tipo-error">{error.tipo}</ErrorCampo>}
                 <input
                   id="evento-tipo-personalizado"
                   className={error.tipo ? "error" : ""}
@@ -2605,6 +2585,7 @@ function CrearEvento() {
                   aria-describedby={error.tipo ? "evento-tipo-error" : undefined}
                   onChange={(e) => setCampo("tipo", e.target.value)}
                 />
+                {error.tipo && <ErrorCampo id="evento-tipo-error">{error.tipo}</ErrorCampo>}
               </div>
             )}
             <div className="field full">
@@ -2613,11 +2594,6 @@ function CrearEvento() {
                   <label htmlFor="evento-inicio">
                     Fecha de inicio <span className="req">*</span>
                   </label>
-                  {error.fechaInicio && (
-                    <ErrorCampo id="evento-inicio-error">
-                      {error.fechaInicio}
-                    </ErrorCampo>
-                  )}
                   <input
                     id="evento-inicio"
                     type="date"
@@ -2630,14 +2606,16 @@ function CrearEvento() {
                     }
                     onChange={(e) => setCampo("fechaInicio", e.target.value)}
                   />
+                  {error.fechaInicio && (
+                    <ErrorCampo id="evento-inicio-error">
+                      {error.fechaInicio}
+                    </ErrorCampo>
+                  )}
                 </div>
                 <div className="field">
                   <label htmlFor="evento-fin">
                     Fecha de fin <span className="req">*</span>
                   </label>
-                  {error.fechaFin && (
-                    <ErrorCampo id="evento-fin-error">{error.fechaFin}</ErrorCampo>
-                  )}
                   <input
                     id="evento-fin"
                     type="date"
@@ -2650,17 +2628,18 @@ function CrearEvento() {
                     }
                     onChange={(e) => setCampo("fechaFin", e.target.value)}
                   />
-                  <small className="field-hint" id="evento-fin-ayuda">
-                    No puede ser anterior al inicio.
-                  </small>
+                  {error.fechaFin ? (
+                    <ErrorCampo id="evento-fin-error">{error.fechaFin}</ErrorCampo>
+                  ) : (
+                    <small className="field-hint" id="evento-fin-ayuda">
+                      No puede ser anterior al inicio.
+                    </small>
+                  )}
                 </div>
                 <div className="field">
                   <label htmlFor="evento-hora">
                     Hora de inicio <span className="req">*</span>
                   </label>
-                  {error.horaEvento && (
-                    <ErrorCampo id="evento-hora-error">{error.horaEvento}</ErrorCampo>
-                  )}
                   <input
                     id="evento-hora"
                     type="time"
@@ -2672,6 +2651,9 @@ function CrearEvento() {
                     }
                     onChange={(e) => setCampo("horaEvento", e.target.value)}
                   />
+                  {error.horaEvento && (
+                    <ErrorCampo id="evento-hora-error">{error.horaEvento}</ErrorCampo>
+                  )}
                 </div>
                 <CampoDuracion
                   id="evento-duracion"
@@ -3110,7 +3092,6 @@ function DetalleEvento() {
   const evento = eventos.find((e) => e.id === id);
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const [tareaEditar, setTareaEditar] = useState<Subtarea | null>(null);
-  const [mover, setMover] = useState<Subtarea | null>(null);
   const [posponer, setPosponer] = useState<Subtarea | null>(null);
   const [editarEvento, setEditarEvento] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState<{
@@ -3279,13 +3260,6 @@ function DetalleEvento() {
           onSave={(payload) => actualizarEvento(evento.id, payload)}
         />
       )}
-      {mover && (
-        <ReprogramarDialog
-          tarea={mover}
-          evento={evento}
-          onClose={() => setMover(null)}
-        />
-      )}
       {posponer && (
         <PosponerDialog
           tarea={posponer}
@@ -3329,7 +3303,6 @@ function DetalleEvento() {
                   key={t.id}
                   tarea={t}
                   onToggle={() => toggle(t)}
-                  onReprogramar={() => setMover(t)}
                   onPosponer={() => setPosponer(t)}
                   onReactivar={() => reactivar(t)}
                   onEditar={() => setTareaEditar(t)}
@@ -3908,160 +3881,8 @@ function EventoEditorDialog({
   );
 }
 
+
 function PosponerDialog({
-  tarea,
-  evento,
-  onClose,
-}: {
-  tarea: Subtarea;
-  evento?: Evento;
-  onClose: () => void;
-}) {
-  const { posponerSubtarea } = useStore();
-  const [fecha, setFecha] = useState("");
-  const [horaInicio, setHoraInicio] = useState(
-    tarea.horaInicio ?? tarea.horaLimite?.slice(0, 5) ?? "09:00",
-  );
-  const [nota, setNota] = useState(tarea.notaPospuesta ?? "");
-  const [error, setError] = useState("");
-  const [guardando, setGuardando] = useState(false);
-
-  const confirmar = async (event: FormEvent) => {
-    event.preventDefault();
-    setError("");
-    if (fecha && evento) {
-      if (fecha < evento.fechaInicio || fecha > evento.fechaFin) {
-        setError(
-          `La nueva fecha debe estar entre el inicio y el fin del evento (${fechaBonita(
-            evento.fechaInicio,
-            true,
-          )} – ${fechaBonita(evento.fechaFin, true)}).`,
-        );
-        return;
-      }
-      if (!horaInicio) {
-        setError("Indica la hora de comienzo para la nueva fecha.");
-        return;
-      }
-    }
-    setGuardando(true);
-    const res = await posponerSubtarea(tarea.id, {
-      fechaLimite: fecha || undefined,
-      horaInicio: fecha ? horaInicio : undefined,
-      nota: nota.trim(),
-    });
-    setGuardando(false);
-    if (res.ok) onClose();
-    else setError(res.error);
-  };
-
-  return (
-    <div className="dialog-backdrop" onMouseDown={onClose}>
-      <form
-        className="dialog dialog-mover dialog-posponer"
-        onSubmit={confirmar}
-        onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.stopPropagation();
-            onClose();
-          }
-        }}
-        noValidate
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="posponer-titulo"
-      >
-        <div className="dialog-body">
-          <div className="dialog-title">
-            <h2 id="posponer-titulo">Posponer gestión</h2>
-            <p>{tarea.titulo}</p>
-          </div>
-          <div className="mover-grid">
-            <div className="field">
-              <label htmlFor="posponer-fecha">
-                Nueva fecha límite{" "}
-                <span className="opcional">(opcional)</span>
-              </label>
-              <input
-                id="posponer-fecha"
-                data-testid="posponer-fecha"
-                type="date"
-                autoFocus
-                min={evento?.fechaInicio}
-                max={evento?.fechaFin}
-                value={fecha}
-                onChange={(event) => {
-                  setFecha(event.target.value);
-                  setError("");
-                }}
-              />
-              <small className="field-hint">
-                Si la dejas vacía, solo cambia el estado y la gestión sale de la
-                carga de hoy.
-              </small>
-            </div>
-            <div className="field">
-              <label htmlFor="posponer-hora">
-                Hora de comienzo{" "}
-                <span className="opcional">(si cambias la fecha)</span>
-              </label>
-              <input
-                id="posponer-hora"
-                data-testid="posponer-hora"
-                type="time"
-                value={horaInicio}
-                disabled={!fecha}
-                onChange={(event) => setHoraInicio(event.target.value)}
-              />
-              <small className="field-hint">
-                La hora límite se recalcula con la estimación actual.
-              </small>
-            </div>
-            <div className="field full">
-              <label htmlFor="posponer-nota">
-                Motivo de la posposición{" "}
-                <span className="opcional">(opcional)</span>
-              </label>
-              <textarea
-                id="posponer-nota"
-                data-testid="posponer-nota"
-                value={nota}
-                maxLength={500}
-                placeholder="ej. esperando confirmación del proveedor"
-                onChange={(event) => setNota(event.target.value)}
-              />
-            </div>
-          </div>
-          {error && (
-            <div className="error-box" role="alert">
-              {error}
-            </div>
-          )}
-        </div>
-        <div className="form-actions">
-          <button
-            type="button"
-            className="button button-ghost"
-            onClick={onClose}
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            className="button button-primary"
-            disabled={guardando}
-            data-testid="confirmar-posponer"
-          >
-            {guardando ? "Guardando…" : "Posponer gestión"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function ReprogramarDialog({
   tarea,
   evento,
   onClose,
@@ -4071,8 +3892,12 @@ function ReprogramarDialog({
   evento?: Evento;
   onClose: () => void;
 }) {
-  const { reprogramarSubtarea, resolverConflictoSubtarea, limiteDiario } =
-    useStore();
+  const {
+    reprogramarSubtarea,
+    posponerSubtarea,
+    resolverConflictoSubtarea,
+    limiteDiario,
+  } = useStore();
   const [fecha, setFecha] = useState(tarea.fechaLimite);
   const [horaInicio, setHoraInicio] = useState(tarea.horaInicio ?? "");
   const [estimacion, setEstimacion] = useState(hoursToTime(tarea.estimacion));
@@ -4121,24 +3946,42 @@ function ReprogramarDialog({
     setErrores({});
     setGuardando(true);
     setError("");
-    const res = await reprogramarSubtarea(tarea.id, {
+    const sinCambios =
+      fechaPropuesta === tarea.fechaLimite &&
+      horaInicio === (tarea.horaInicio ?? "") &&
+      horas === tarea.estimacion;
+
+    if (!sinCambios) {
+      const res = await reprogramarSubtarea(tarea.id, {
+        fechaLimite: fechaPropuesta,
+        horaInicio,
+        estimacion: horas,
+        motivoMovimiento: motivo.trim(),
+      });
+      if (!res.ok) {
+        setGuardando(false);
+        if (res.tipo === "conflicto") {
+          setAvisoPersistencia("");
+          setEstimacionConflicto(horas);
+          setConflicto(res.conflicto);
+          return;
+        }
+        setError(res.error);
+        return;
+      }
+    }
+
+    const pospuesta = await posponerSubtarea(tarea.id, {
       fechaLimite: fechaPropuesta,
       horaInicio,
-      estimacion: horas,
-      motivoMovimiento: motivo.trim(),
+      nota: motivo.trim(),
     });
     setGuardando(false);
-    if (res.ok) {
+    if (pospuesta.ok) {
       onClose();
       return;
     }
-    if (res.tipo === "conflicto") {
-      setAvisoPersistencia("");
-      setEstimacionConflicto(horas);
-      setConflicto(res.conflicto);
-      return;
-    }
-    setError(res.error);
+    setError(pospuesta.error);
   };
 
   const confirmar = (e: FormEvent) => {
@@ -4157,21 +4000,27 @@ function ReprogramarDialog({
     setAvisoPersistencia("");
   };
 
-  const moverAFechaSugerida = async (fechaSugerida: string) => {
+  const posponerEnFechaSugerida = async (fechaSugerida: string) => {
     setGuardando(true);
     setError("");
     const res = await resolverConflictoSubtarea(tarea.id, "mover_otro_dia", {
       plazo: fechaSugerida,
     });
-    setGuardando(false);
     if (!res.ok) {
+      setGuardando(false);
       setError(res.error);
       return;
     }
     if (res.data.resuelto) {
-      onClose();
+      const pospuesta = await posponerSubtarea(tarea.id, {
+        nota: motivo.trim(),
+      });
+      setGuardando(false);
+      if (pospuesta.ok) onClose();
+      else setError(pospuesta.error);
       return;
     }
+    setGuardando(false);
     setFecha(fechaSugerida);
     setEstimacionConflicto(estimacionNumerica);
     setAvisoPersistencia(
@@ -4202,15 +4051,21 @@ function ReprogramarDialog({
     const res = await resolverConflictoSubtarea(tarea.id, "reducir_horas", {
       estimacion: estimacionNumerica,
     });
-    setGuardando(false);
     if (!res.ok) {
+      setGuardando(false);
       setError(res.error);
       return;
     }
     if (res.data.resuelto) {
-      onClose();
+      const pospuesta = await posponerSubtarea(tarea.id, {
+        nota: motivo.trim(),
+      });
+      setGuardando(false);
+      if (pospuesta.ok) onClose();
+      else setError(pospuesta.error);
       return;
     }
+    setGuardando(false);
     setEstimacionConflicto(estimacionNumerica);
     setAvisoPersistencia(
       `Las horas se guardaron, pero el día sigue sobrecargado: quedan ${formatoHoras(res.data.horasExceso)} h por encima de tu límite.`,
@@ -4270,7 +4125,7 @@ function ReprogramarDialog({
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
       <form
-        className="dialog dialog-mover"
+        className="dialog dialog-posponer"
         onSubmit={confirmar}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(event) => {
@@ -4282,14 +4137,14 @@ function ReprogramarDialog({
         noValidate
         role="dialog"
         aria-modal="true"
-        aria-labelledby="mover-titulo"
+        aria-labelledby="posponer-titulo"
       >
         <div className="dialog-body">
           <div className="dialog-title">
-            <h2 id="mover-titulo">Mover gestión</h2>
+            <h2 id="posponer-titulo">Posponer gestión</h2>
             <p>{tarea.titulo}</p>
           </div>
-          <div className="mover-grid">
+          <div className="posponer-grid">
             <div className="field">
               <label htmlFor="reprogramar-fecha">
                 Nueva fecha límite <span className="req">*</span>
@@ -4341,6 +4196,7 @@ function ReprogramarDialog({
               )}
               <input
                 id="reprogramar-hora"
+                data-testid="reprogramar-hora"
                 type="time"
                 value={horaInicio}
                 className={errores.horaInicio ? "error" : ""}
@@ -4368,7 +4224,7 @@ function ReprogramarDialog({
             />
             <div className="field">
               <label htmlFor="reprogramar-motivo">
-                Motivo del cambio{" "}
+                Motivo de la posposición{" "}
                 <span className="opcional">(opcional)</span>
               </label>
               <input
@@ -4383,8 +4239,8 @@ function ReprogramarDialog({
                 onChange={(e) => setMotivo(e.target.value)}
               />
               <small className="field-hint" id="reprogramar-motivo-ayuda">
-                Puedes mover la gestión sin escribirlo. Queda anotado junto a la
-                gestión.
+                Puedes posponer la gestión sin escribirlo. Queda anotado junto a
+                la gestión.
               </small>
             </div>
           </div>
@@ -4412,7 +4268,7 @@ function ReprogramarDialog({
             className="button button-primary"
             disabled={guardando}
           >
-            {guardando ? "Guardando…" : "Mover gestión"}
+            {guardando ? "Guardando…" : "Posponer gestión"}
           </button>
         </div>
       </form>
@@ -4481,7 +4337,7 @@ function ReprogramarDialog({
                         key={sugerida.fecha}
                       >
                         <div>
-                          <strong>Mover a un día con capacidad</strong>
+                          <strong>Posponer en un día con capacidad</strong>
                           <span>
                             {fechaHoraBonita(sugerida.fecha)} ·{" "}
                             {formatoHoras(sugerida.horasTotalesProyectadas)} h de{" "}
@@ -4491,7 +4347,7 @@ function ReprogramarDialog({
                         <button
                           type="button"
                           className="button button-secondary button-small"
-                          onClick={() => void moverAFechaSugerida(sugerida.fecha)}
+                          onClick={() => void posponerEnFechaSugerida(sugerida.fecha)}
                           disabled={guardando}
                           data-testid={`use-suggested-reschedule-date-${sugerida.fecha}`}
                         >
@@ -4548,7 +4404,7 @@ function ReprogramarDialog({
                       <div>
                         <strong>Posponer la gestión</strong>
                         <span>
-                          Sale de la carga del día sin mover la fecha.
+                          Sale de la carga del día sin cambiar la fecha.
                         </span>
                       </div>
                       <div className="capacity-conflict-reduce">
