@@ -542,7 +542,6 @@ function InfoReglaPrioridad() {
           fontSize: 12,
           fontWeight: 500,
           transition: "color 0.15s ease",
-          outline: "none",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.color = "var(--papel)";
@@ -3568,21 +3567,31 @@ function ConfirmDialog({
         className="dialog"
         style={{ padding: "32px 28px", maxWidth: 420, borderRadius: 12 }}
         onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
       >
         <div className="dialog-body" style={{ textAlign: "center" }}>
           <h3
+            id="confirm-title"
             style={{
               fontSize: "20px",
               marginBottom: "12px",
               fontWeight: 600,
-              color: "#fff",
+              color: "var(--papel)",
             }}
           >
             {titulo}
           </h3>
           <p
             style={{
-              color: "#b0b0b0",
+              color: "var(--apagado)",
               fontSize: "14px",
               marginBottom: "32px",
               lineHeight: 1.6,
@@ -3603,12 +3612,13 @@ function ConfirmDialog({
           <button
             type="button"
             className="button"
+            autoFocus
             style={{
               flex: 1,
               padding: "11px",
               background: "transparent",
-              border: "1px solid #555",
-              color: "#e0e0e0",
+              border: "1px solid var(--linea-fuerte)",
+              color: "var(--papel)",
               fontWeight: 500,
               borderRadius: 8,
             }}
@@ -3622,8 +3632,8 @@ function ConfirmDialog({
             style={{
               flex: 1,
               padding: "11px",
-              background: isDanger ? "#d33833" : "var(--azul)",
-              border: `1px solid ${isDanger ? "#d33833" : "var(--azul)"}`,
+              background: isDanger ? "#b91c1c" : "var(--azul)",
+              border: `1px solid ${isDanger ? "#b91c1c" : "var(--azul)"}`,
               color: "#fff",
               fontWeight: 500,
               borderRadius: 8,
@@ -3951,6 +3961,12 @@ function PosponerDialog({
         className="dialog dialog-mover dialog-posponer"
         onSubmit={confirmar}
         onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
         noValidate
         role="dialog"
         aria-modal="true"
@@ -3971,6 +3987,7 @@ function PosponerDialog({
                 id="posponer-fecha"
                 data-testid="posponer-fecha"
                 type="date"
+                autoFocus
                 min={evento?.fechaInicio}
                 max={evento?.fechaFin}
                 value={fecha}
@@ -4070,7 +4087,16 @@ function ReprogramarDialog({
   );
   const [notaPosponer, setNotaPosponer] = useState("");
   const conflictoRef = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
   const estimacionNumerica = timeToHours(estimacion);
+
+  useEffect(() => {
+    previousFocus.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    return () => previousFocus.current?.focus();
+  }, []);
   /**
    * El tope es la duración total del evento (el límite diario solo si no hay
    * evento a la vista); nunca por debajo de la estimación original.
@@ -4247,6 +4273,12 @@ function ReprogramarDialog({
         className="dialog dialog-mover"
         onSubmit={confirmar}
         onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !conflicto) {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
         noValidate
         role="dialog"
         aria-modal="true"
@@ -4270,6 +4302,7 @@ function ReprogramarDialog({
               <input
                 id="reprogramar-fecha"
                 type="date"
+                autoFocus
                 min={evento?.fechaInicio}
                 max={evento?.fechaFin}
                 value={fecha}
@@ -4646,9 +4679,9 @@ function Progreso() {
               >
                 Eventos Activos
               </div>
-              <div style={{ fontSize: "42px", color: "#fff", fontWeight: 300 }}>
+              <div style={{ fontSize: "42px", color: "var(--papel)", fontWeight: 300 }}>
                 {eventosActivos}{" "}
-                <span style={{ fontSize: "16px", color: "#555" }}>
+                <span style={{ fontSize: "16px", color: "var(--apagado)" }}>
                   / {totalEventos}
                 </span>
               </div>
@@ -4666,9 +4699,9 @@ function Progreso() {
               >
                 Gestiones Completadas
               </div>
-              <div style={{ fontSize: "42px", color: "#fff", fontWeight: 300 }}>
+              <div style={{ fontSize: "42px", color: "var(--papel)", fontWeight: 300 }}>
                 {tareasCompletadas}{" "}
-                <span style={{ fontSize: "16px", color: "#555" }}>
+                <span style={{ fontSize: "16px", color: "var(--apagado)" }}>
                   / {totalTareas}
                 </span>
               </div>
@@ -4686,7 +4719,7 @@ function Progreso() {
               >
                 Gestiones Pospuestas
               </div>
-              <div style={{ fontSize: "42px", color: "#fff", fontWeight: 300 }}>
+              <div style={{ fontSize: "42px", color: "var(--papel)", fontWeight: 300 }}>
                 {tareasPospuestas}
               </div>
             </div>
@@ -4696,7 +4729,7 @@ function Progreso() {
               fontSize: "18px",
               marginBottom: "16px",
               fontWeight: 500,
-              color: "#e0e0e0",
+              color: "var(--papel)",
             }}
           >
             Desglose por Evento
@@ -4722,7 +4755,7 @@ function Progreso() {
                         fontSize: "15px",
                         fontWeight: 500,
                         marginBottom: "6px",
-                        color: "#fff",
+                        color: "var(--papel)",
                       }}
                     >
                       {e.nombre}
@@ -4730,7 +4763,7 @@ function Progreso() {
                     <div
                       style={{
                         fontSize: "24px",
-                        color: p === 100 ? "var(--salvia)" : "#e0e0e0",
+                        color: p === 100 ? "var(--salvia)" : "var(--papel)",
                         fontWeight: 300,
                       }}
                     >
@@ -4813,7 +4846,7 @@ function RestablecerPasswordPage() {
               width: 48,
               height: 48,
               background: "var(--azul)",
-              color: "var(--papel)",
+              color: "#ffffff",
               borderRadius: 8,
               display: "flex",
               alignItems: "center",
@@ -4865,7 +4898,7 @@ function RestablecerPasswordPage() {
                 style={{
                   width: "100%",
                   padding: "12px",
-                  background: "var(--azul-claro)",
+                  background: "var(--azul)",
                   color: "white",
                   border: "none",
                   borderRadius: 6,
@@ -4961,7 +4994,7 @@ function RestablecerPasswordPage() {
                   style={{
                     width: "100%",
                     padding: "12px",
-                    background: "var(--azul-claro)",
+                    background: "var(--azul)",
                     color: "white",
                     border: "none",
                     borderRadius: 6,
@@ -4980,7 +5013,7 @@ function RestablecerPasswordPage() {
                   style={{
                     width: "100%",
                     padding: "12px",
-                    background: "var(--azul-claro)",
+                    background: "var(--azul)",
                     color: "white",
                     border: "none",
                     borderRadius: 6,
@@ -5070,7 +5103,7 @@ function LoginPage() {
               width: 48,
               height: 48,
               background: "var(--azul)",
-              color: "var(--papel)",
+              color: "#ffffff",
               borderRadius: 8,
               display: "flex",
               alignItems: "center",
@@ -5113,10 +5146,11 @@ function LoginPage() {
             style={{ display: "flex", flexDirection: "column", gap: 20 }}
           >
             <div className="field">
-              <label style={{ color: "var(--papel)" }}>
+              <label htmlFor="login-email" style={{ color: "var(--papel)" }}>
                 Correo electrónico
               </label>
               <input
+                id="login-email"
                 type="email"
                 required
                 value={correo}
@@ -5127,7 +5161,9 @@ function LoginPage() {
             </div>
             <div className="field">
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <label style={{ color: "var(--papel)" }}>Contraseña</label>
+                <label htmlFor="login-password" style={{ color: "var(--papel)" }}>
+                  Contraseña
+                </label>
                 <span
                   onClick={() => setLocation("/recuperar")}
                   style={{
@@ -5147,6 +5183,7 @@ function LoginPage() {
                 }}
               >
                 <input
+                  id="login-password"
                   type={mostrarPassword ? "text" : "password"}
                   required
                   value={password}
@@ -5161,6 +5198,8 @@ function LoginPage() {
                 />
                 <button
                   type="button"
+                  aria-label="Mostrar u ocultar contraseña"
+                  aria-pressed={mostrarPassword}
                   onClick={() => setMostrarPassword(!mostrarPassword)}
                   style={{
                     position: "absolute",
@@ -5343,8 +5382,11 @@ function RegisterPage() {
             style={{ display: "flex", flexDirection: "column", gap: 15 }}
           >
             <div className="field">
-              <label style={{ color: "var(--papel)" }}>Nombre completo</label>
+              <label htmlFor="registro-nombre" style={{ color: "var(--papel)" }}>
+                Nombre completo
+              </label>
               <input
+                id="registro-nombre"
                 type="text"
                 value={nombre}
                 onChange={(e) => setNombre(e.target.value)}
@@ -5353,10 +5395,11 @@ function RegisterPage() {
               />
             </div>
             <div className="field">
-              <label style={{ color: "var(--papel)" }}>
+              <label htmlFor="registro-email" style={{ color: "var(--papel)" }}>
                 Correo electrónico
               </label>
               <input
+                id="registro-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -5365,7 +5408,9 @@ function RegisterPage() {
               />
             </div>
             <div className="field">
-              <label style={{ color: "var(--papel)" }}>Contraseña</label>
+              <label htmlFor="registro-password" style={{ color: "var(--papel)" }}>
+                Contraseña
+              </label>
               <div
                 style={{
                   position: "relative",
@@ -5374,6 +5419,7 @@ function RegisterPage() {
                 }}
               >
                 <input
+                  id="registro-password"
                   type={mostrarPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -5387,6 +5433,8 @@ function RegisterPage() {
                 />
                 <button
                   type="button"
+                  aria-label="Mostrar u ocultar contraseña"
+                  aria-pressed={mostrarPassword}
                   onClick={() => setMostrarPassword(!mostrarPassword)}
                   style={{
                     position: "absolute",
@@ -5435,7 +5483,7 @@ function RegisterPage() {
               </div>
             </div>
             <div className="field">
-              <label style={{ color: "var(--papel)" }}>
+              <label htmlFor="registro-password-confirm" style={{ color: "var(--papel)" }}>
                 Confirmar contraseña
               </label>
               <div
@@ -5446,6 +5494,7 @@ function RegisterPage() {
                 }}
               >
                 <input
+                  id="registro-password-confirm"
                   type={mostrarPassword ? "text" : "password"}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
@@ -5459,6 +5508,8 @@ function RegisterPage() {
                 />
                 <button
                   type="button"
+                  aria-label="Mostrar u ocultar contraseña"
+                  aria-pressed={mostrarPassword}
                   onClick={() => setMostrarPassword(!mostrarPassword)}
                   style={{
                     position: "absolute",
@@ -5600,7 +5651,7 @@ function RecuperarPasswordPage() {
               width: 48,
               height: 48,
               background: "var(--azul)",
-              color: "var(--papel)",
+              color: "#ffffff",
               borderRadius: 8,
               display: "flex",
               alignItems: "center",
@@ -5664,7 +5715,7 @@ function RecuperarPasswordPage() {
                 style={{
                   width: "100%",
                   padding: "12px",
-                  background: "var(--azul-claro)",
+                  background: "var(--azul)",
                   color: "white",
                   border: "none",
                   borderRadius: 6,
@@ -5734,7 +5785,7 @@ function RecuperarPasswordPage() {
                 style={{
                   width: "100%",
                   padding: "12px",
-                  background: "var(--azul-claro)",
+                  background: "var(--azul)",
                   color: "white",
                   border: "none",
                   borderRadius: 6,
