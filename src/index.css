@@ -11,11 +11,11 @@
   --linea-fuerte: #d1d5db;
   --papel: #0f172a;
   --apagado: #334155;
-  --azul: #2563eb;
-  --azul-claro: #3b82f6;
-  --ambar: #d97706;
-  --oxido: #dc2626;
-  --salvia: #059669;
+  --azul: #1d4ed8;
+  --azul-claro: #1d4ed8;
+  --ambar: #92400e;
+  --oxido: #b91c1c;
+  --salvia: #047857;
   --background: 0 0% 96%;
   --foreground: 0 0% 10%;
   --border: 0 0% 85%;
@@ -34,9 +34,9 @@
   --papel: #ededed;
   --apagado: #9a9a9a;
   --azul: #1f4e79;
-  --azul-claro: #2c6693;
+  --azul-claro: #7cb3e0;
   --ambar: #e8a33d;
-  --oxido: #d1512f;
+  --oxido: #f08a70;
   --salvia: #6fae86;
   --fuente-titulo: "Space Grotesk", sans-serif;
   --fuente-texto: "Inter", sans-serif;
@@ -137,7 +137,7 @@ p {
   display: grid;
   place-items: center;
   background: var(--azul);
-  color: var(--papel);
+  color: #ffffff;
   border-radius: 5px;
   font-family: var(--fuente-titulo);
   font-weight: 700;
@@ -186,8 +186,8 @@ p {
   color: var(--papel);
 }
 .nav-link.active {
-  background: rgba(44, 102, 147, 0.24);
-  color: var(--azul);
+  background: rgba(29, 78, 216, 0.1);
+  color: var(--azul-claro);
   box-shadow: inset 2px 0 0 var(--azul-claro);
 }
 .nav-link .count {
@@ -461,7 +461,7 @@ p {
   border-color: rgba(232, 163, 61, 0.45);
 }
 .tag-overdue {
-  color: #ef927c;
+  color: var(--oxido);
   border-color: rgba(209, 81, 47, 0.45);
 }
 .tag-done {
@@ -481,7 +481,7 @@ p {
   font-weight: 500;
 }
 .tag-high {
-  color: #ef927c;
+  color: var(--oxido);
 }
 .task-help {
   position: relative;
@@ -1555,14 +1555,11 @@ select option {
 }
 
 /* Diálogos con rejilla propia. */
-.dialog-mover,
+.dialog-posponer,
 .dialog-evento {
   width: min(620px, 100%);
 }
-.dialog-posponer {
-  width: min(560px, 100%);
-}
-.mover-grid {
+.posponer-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 15px;
@@ -1629,7 +1626,7 @@ select option {
   }
   .plan-grid,
   .task-editor-grid,
-  .mover-grid {
+  .posponer-grid {
     grid-template-columns: 1fr;
   }
   .plan-head {

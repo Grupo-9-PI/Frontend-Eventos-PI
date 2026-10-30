@@ -348,7 +348,7 @@ export const repositorioEventos = {
         tipo: "error",
         error: errorDe(
           e,
-          "No se pudo mover la gestión. Revisa tu conexión e inténtalo de nuevo.",
+          "No se pudo guardar la nueva fecha. Revisa tu conexión e inténtalo de nuevo.",
         ),
       };
     }
