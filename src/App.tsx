@@ -1676,18 +1676,6 @@ function Hoy() {
     Boolean(filtrosHoy.evento) ||
     Boolean(filtrosHoy.estado && filtrosHoy.estado !== "abiertas");
   const estadoActual = filtrosHoy.estado ?? "abiertas";
-  const pospuestasHoy: TareaHoy[] = eventos
-    .filter((evento) => !filtrosHoy.evento || evento.id === filtrosHoy.evento)
-    .flatMap((evento) =>
-      evento.subtareas
-        .filter((tarea) => tarea.estado === "pospuesta")
-        .map((tarea) => ({
-          ...tarea,
-          eventoId: evento.id,
-          eventoNombre: evento.nombre,
-        })),
-    )
-    .sort((a, b) => a.fechaLimite.localeCompare(b.fechaLimite));
 
   const cambiarEstado = (tarea: TareaHoy) => {
     actualizarSubtarea(tarea.eventoId, {
@@ -1895,45 +1883,6 @@ function Hoy() {
               {bloque("Para hoy", grupos.para_hoy, "Nada vence hoy.")}
               {bloque("Próximas", grupos.proximas, "No hay próximas gestiones.")}
             </>
-          )}
-          {estadoActual === "abiertas" && pospuestasHoy.length > 0 && (
-            <section className="hoy-section">
-              <div className="section-head">
-                <div className="section-title-row">
-                  <h2 className="section-title">Pospuestas</h2>
-                  <span className="section-count">
-                    {pospuestasHoy.length}
-                  </span>
-                </div>
-                <span className="tag tag-pospuesta">
-                  Fuera de la carga de hoy
-                </span>
-              </div>
-              <div className="task-list">
-                {pospuestasHoy.map((t) => (
-                  <FilaTarea
-                    key={t.id}
-                    tarea={t}
-                    mostrarEvento
-                    onToggle={() =>
-                      actualizarSubtarea(t.eventoId, {
-                        ...t,
-                        estado: t.estado === "hecho" ? "pendiente" : "hecho",
-                        notaPospuesta: "",
-                      })
-                    }
-                    onPosponer={() => setPosponer(t)}
-                    onReactivar={() =>
-                      actualizarSubtarea(t.eventoId, {
-                        ...t,
-                        estado: "pendiente",
-                        notaPospuesta: "",
-                      })
-                    }
-                  />
-                ))}
-              </div>
-            </section>
           )}
         </>
       )}
