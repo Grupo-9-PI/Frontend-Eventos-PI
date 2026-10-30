@@ -1150,16 +1150,6 @@ function FilaTarea({
           )}
           {hecha && <span className="tag tag-done">Hecha</span>}
           {pospuesta && <span className="tag tag-pospuesta">Pospuesta</span>}
-          {tarea.reprogramadaEn && (
-            <span
-              className="tag tag-reprogramada"
-              title={`Reprogramada el ${fechaBonita(
-                tarea.reprogramadaEn.slice(0, 10),
-              )}`}
-            >
-              Reprogramada
-            </span>
-          )}
         </div>
         {motivo && (
           <div className="task-note" data-testid={`task-note-${tarea.id}`}>
